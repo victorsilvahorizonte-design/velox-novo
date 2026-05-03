@@ -1,0 +1,14 @@
+ICAO;NOME;MUNICIPIO;UF;USO;OPERACAO;COMPRIMENTO_PISTA;ENVERGADURA
+SBGR;Aeroporto Internacional de São Paulo - Guarulhos;Guarulhos;SP;Público;IFR;3700;65
+SBSP;Aeroporto de São Paulo - Congonhas;São Paulo;SP;Público;IFR;1940;36
+SBKP;Aeroporto Internacional de Viracopos;Campinas;SP;Público;IFR;3240;65
+SBBR;Aeroporto Internacional de Brasília;Brasília;DF;Público;IFR;3300;65
+SBGO;Aeroporto Internacional de Goiânia;Goiânia;GO;Público;IFR;2500;52
+SBGL;Aeroporto Internacional do Rio de Janeiro - Galeão;Rio de Janeiro;RJ;Público;IFR;4000;65
+SBRJ;Aeroporto Santos Dumont;Rio de Janeiro;RJ;Público;IFR;1323;36
+SBCF;Aeroporto Internacional de Confins;Belo Horizonte;MG;Público;IFR;3600;65
+SBSV;Aeroporto Internacional de Salvador;Salvador;BA;Público;IFR;3000;65
+SBPA;Aeroporto Internacional de Porto Alegre;Porto Alegre;RS;Público;IFR;3200;65
+SBEG;Aeroporto Internacional de Manaus;Manaus;AM;Público;IFR;2700;65
+SWBC;Aeroporto de Barcelos;Barcelos;AM;Público;VFR;1500;24
+SBTK;Aeroporto de Tarauacá;Tarauacá;AC;Público;VFR;1200;24
