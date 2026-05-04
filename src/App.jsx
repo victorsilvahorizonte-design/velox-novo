@@ -3,6 +3,10 @@ import "./App.css";
 
 import logoVelox from "./assets/logo-velox.png";
 
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+import jsPDF from "jspdf";
+
 import { NORMAS } from "./data/normas";
 import { CONFIG_INICIAL_RBAC154 } from "./data/configuracaoAerodromo";
 import { verificarAplicabilidade } from "./utils/aplicabilidade";
@@ -340,6 +344,34 @@ function classeStatus(status) {
   return "pendente";
 }
 
+function gerarIdEvidencia(index) {
+  return `EV-${String(index + 1).padStart(3, "0")}`;
+}
+
+async function urlParaBase64(url) {
+  const resposta = await fetch(url);
+  const blob = await resposta.blob();
+
+  return await new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onloadend = () => resolve(leitor.result);
+    leitor.onerror = reject;
+    leitor.readAsDataURL(blob);
+  });
+}
+
+function extensaoImagem(dataUrl) {
+  if (String(dataUrl).includes("image/png")) return "png";
+  return "jpeg";
+}
+
+function corStatus(status) {
+  if (status === "CONFORME") return "16A34A";
+  if (status === "NÃO CONFORME") return "EF4444";
+  if (status === "NÃO APLICÁVEL") return "64748B";
+  return "C9A300";
+}
+
 export default function App() {
   const [normaSelecionada, setNormaSelecionada] = useState("RBAC153");
   const [configAerodromo, setConfigAerodromo] = useState(CONFIG_INICIAL);
@@ -349,6 +381,7 @@ export default function App() {
   const [busca, setBusca] = useState("");
   const [respostas, setRespostas] = useState({});
   const [mostrarConfig, setMostrarConfig] = useState(false);
+  const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
 
   useEffect(() => {
     const respostasSalvas = localStorage.getItem("respostas-inspecao");
@@ -588,6 +621,7 @@ export default function App() {
                   nome: arquivo.name,
                   tipo: arquivo.type,
                   data: leitor.result,
+                  criadoEm: new Date().toISOString(),
                 },
               ],
             },
@@ -622,6 +656,568 @@ export default function App() {
 
     setRespostas({});
     localStorage.removeItem("respostas-inspecao");
+  }
+
+  function montarEvidencias() {
+    const lista = [];
+
+    itensAplicaveis.forEach((item) => {
+      const chave = item.id || item.ref;
+      const resposta = respostas[chave] || {};
+      const imagens = resposta.evidenciasAnexadas || [];
+
+      imagens.forEach((imagem) => {
+        lista.push({
+          id: gerarIdEvidencia(lista.length),
+          itemId: chave,
+          itemTitulo: item.item || item.descricao || "Item de inspeção",
+          requisito: item.criterio || "",
+          observacao: resposta.obs || "",
+          status: resposta.status || "NÃO VERIFICADO",
+          imagem,
+        });
+      });
+    });
+
+    return lista;
+  }
+
+  async function exportarExcelPremium() {
+    try {
+      setGerandoRelatorio(true);
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Velox Service";
+      workbook.created = new Date();
+
+      const logoBase64 = await urlParaBase64(logoVelox);
+      const logoId = workbook.addImage({
+        base64: logoBase64,
+        extension: extensaoImagem(logoBase64),
+      });
+
+      const evidencias = montarEvidencias();
+
+      const wsResumo = workbook.addWorksheet("Resumo", {
+        pageSetup: { paperSize: 9, orientation: "portrait" },
+        headerFooter: {
+          oddHeader: "&CRelatório de Inspeção Aeroportuária - Velox Service",
+          oddFooter: "&LVELOX SERVICE&R&P de &N",
+        },
+      });
+
+      wsResumo.addImage(logoId, {
+        tl: { col: 0.2, row: 0.2 },
+        ext: { width: 210, height: 75 },
+      });
+
+      wsResumo.mergeCells("A5:F5");
+      wsResumo.getCell("A5").value = "RELATÓRIO DE INSPEÇÃO AEROPORTUÁRIA";
+      wsResumo.getCell("A5").font = {
+        bold: true,
+        size: 18,
+        color: { argb: "FFFFFFFF" },
+      };
+      wsResumo.getCell("A5").alignment = { horizontal: "center" };
+      wsResumo.getCell("A5").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF0A1F12" },
+      };
+
+      const resumoLinhas = [
+        ["Data da inspeção", new Date().toLocaleDateString("pt-BR")],
+        ["Aeródromo", configAerodromo.nomeAerodromo || "Não informado"],
+        ["Código ICAO", configAerodromo.icao || "Não informado"],
+        ["Município/UF", `${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`],
+        ["Responsável", "Inspetor Velox"],
+        ["Norma selecionada", `${normaAtual.nome || normaSelecionada} - ${normaAtual.titulo || ""}`],
+        ["Classificação RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
+        ["Código RBAC 154", configAerodromo.codigoReferenciaRBAC154],
+        ["Categoria RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
+        ["Total aplicável", resumo.total],
+        ["Conformes", resumo.contagem["CONFORME"]],
+        ["Não conformes", resumo.contagem["NÃO CONFORME"]],
+        ["Não aplicáveis", resumo.contagem["NÃO APLICÁVEL"]],
+        ["Não verificados", resumo.contagem["NÃO VERIFICADO"]],
+      ];
+
+      wsResumo.columns = [
+        { width: 28 },
+        { width: 60 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+      ];
+
+      resumoLinhas.forEach((linha, index) => {
+        const row = wsResumo.getRow(index + 7);
+        row.values = linha;
+        row.getCell(1).font = { bold: true, color: { argb: "FF07120B" } };
+        row.getCell(2).font = { color: { argb: "FF0F172A" } };
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD1D5DB" } },
+            left: { style: "thin", color: { argb: "FFD1D5DB" } },
+            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+            right: { style: "thin", color: { argb: "FFD1D5DB" } },
+          };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: index % 2 === 0 ? "FFF8FAFC" : "FFFFFFFF" },
+          };
+        });
+      });
+
+      const wsItens = workbook.addWorksheet("Itens Inspecionados", {
+        views: [{ state: "frozen", ySplit: 1 }],
+        headerFooter: {
+          oddHeader: "&CItens Inspecionados - Velox Service",
+          oddFooter: "&LRelatório Oficial&R&P de &N",
+        },
+      });
+
+      wsItens.columns = [
+        { header: "ID", key: "id", width: 18 },
+        { header: "Descrição", key: "descricao", width: 48 },
+        { header: "Requisito Violado / Critério", key: "criterio", width: 48 },
+        { header: "Observações", key: "obs", width: 42 },
+        { header: "Status", key: "status", width: 20 },
+        { header: "Responsável", key: "responsavel", width: 24 },
+        { header: "Prazo", key: "prazo", width: 18 },
+        { header: "Evidências", key: "evidencias", width: 24 },
+      ];
+
+      wsItens.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF0A1F12" },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      });
+
+      itensAplicaveis.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = respostas[chave] || {};
+        const evDoItem = evidencias
+          .filter((ev) => ev.itemId === chave)
+          .map((ev) => ev.id)
+          .join(", ");
+
+        const row = wsItens.addRow({
+          id: chave,
+          descricao: item.item || item.descricao || "",
+          criterio: item.criterio || item.evidencias || "",
+          obs: resposta.obs || "",
+          status: resposta.status || "NÃO VERIFICADO",
+          responsavel: resposta.responsavel || "",
+          prazo: resposta.prazo || "",
+          evidencias: evDoItem || "Sem evidência",
+        });
+
+        row.eachCell((cell) => {
+          cell.alignment = { vertical: "top", wrapText: true };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD1D5DB" } },
+            left: { style: "thin", color: { argb: "FFD1D5DB" } },
+            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+            right: { style: "thin", color: { argb: "FFD1D5DB" } },
+          };
+        });
+
+        row.getCell(5).font = {
+          bold: true,
+          color: { argb: "FFFFFFFF" },
+        };
+        row.getCell(5).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: `FF${corStatus(resposta.status || "NÃO VERIFICADO")}` },
+        };
+      });
+
+      const wsEvidencias = workbook.addWorksheet("Evidências", {
+        headerFooter: {
+          oddHeader: "&CEvidências Fotográficas - Velox Service",
+          oddFooter: "&LRegistro Fotográfico Oficial&R&P de &N",
+        },
+      });
+
+      wsEvidencias.columns = [
+        { header: "ID Evidência", key: "id", width: 18 },
+        { header: "ID Item", key: "itemId", width: 18 },
+        { header: "Item Inspecionado", key: "itemTitulo", width: 48 },
+        { header: "Status", key: "status", width: 20 },
+        { header: "Observação", key: "observacao", width: 48 },
+        { header: "Foto", key: "foto", width: 34 },
+      ];
+
+      wsEvidencias.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF0A1F12" },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      });
+
+      evidencias.forEach((ev, index) => {
+        const rowIndex = index + 2;
+        const row = wsEvidencias.addRow({
+          id: ev.id,
+          itemId: ev.itemId,
+          itemTitulo: ev.itemTitulo,
+          status: ev.status,
+          observacao: ev.observacao,
+          foto: "Imagem inserida ao lado",
+        });
+
+        row.height = 115;
+
+        row.eachCell((cell) => {
+          cell.alignment = { vertical: "top", wrapText: true };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD1D5DB" } },
+            left: { style: "thin", color: { argb: "FFD1D5DB" } },
+            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+            right: { style: "thin", color: { argb: "FFD1D5DB" } },
+          };
+        });
+
+        try {
+          const imgId = workbook.addImage({
+            base64: ev.imagem.data,
+            extension: extensaoImagem(ev.imagem.data),
+          });
+
+          wsEvidencias.addImage(imgId, {
+            tl: { col: 5.1, row: rowIndex - 0.9 },
+            ext: { width: 185, height: 105 },
+          });
+        } catch (erro) {
+          console.error("Erro ao inserir imagem no Excel:", erro);
+        }
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+
+      saveAs(
+        new Blob([buffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+        `Relatorio_Inspecao_${configAerodromo.icao || "VELOX"}.xlsx`
+      );
+    } catch (erro) {
+      console.error(erro);
+      alert("Erro ao gerar Excel premium.");
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  }
+
+  async function exportarPDFPremium() {
+    try {
+      setGerandoRelatorio(true);
+
+      const doc = new jsPDF("p", "mm", "a4");
+      const largura = doc.internal.pageSize.getWidth();
+      const altura = doc.internal.pageSize.getHeight();
+      const logoBase64 = await urlParaBase64(logoVelox);
+      const evidencias = montarEvidencias();
+
+      function rodape(paginaTitulo = "") {
+        doc.setFillColor(6, 19, 11);
+        doc.rect(0, altura - 15, largura, 15, "F");
+        doc.setFontSize(8);
+        doc.setTextColor(220, 255, 230);
+        doc.text("VELOX SERVICE • Gestão e Administração Aeroportuária", 12, altura - 7);
+        doc.text(paginaTitulo, largura - 12, altura - 7, { align: "right" });
+      }
+
+      function cabecalho(titulo) {
+        doc.setFillColor(6, 19, 11);
+        doc.rect(0, 0, largura, 24, "F");
+        doc.addImage(logoBase64, "PNG", 10, 5, 42, 14);
+        doc.setFontSize(11);
+        doc.setTextColor(255, 255, 255);
+        doc.text(titulo, largura - 10, 14, { align: "right" });
+      }
+
+      doc.setFillColor(6, 19, 11);
+      doc.rect(0, 0, largura, altura, "F");
+
+      doc.setFillColor(32, 196, 90);
+      doc.rect(0, 0, 8, altura, "F");
+
+      doc.addImage(logoBase64, "PNG", 22, 24, 78, 28);
+
+      doc.setFontSize(24);
+      doc.setTextColor(255, 255, 255);
+      doc.text("Relatório de Inspeção", 22, 82);
+      doc.text("Aeroportuária", 22, 94);
+
+      doc.setFontSize(11);
+      doc.setTextColor(210, 230, 218);
+      doc.text("Relatório técnico oficial com checklist, observações e evidências fotográficas.", 22, 106);
+
+      doc.setDrawColor(32, 196, 90);
+      doc.line(22, 114, 185, 114);
+
+      doc.setFontSize(12);
+      doc.setTextColor(255, 255, 255);
+      doc.text(`Aeródromo: ${configAerodromo.nomeAerodromo || "Não informado"}`, 22, 132);
+      doc.text(`ICAO: ${configAerodromo.icao || "Não informado"}`, 22, 142);
+      doc.text(`Município/UF: ${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`, 22, 152);
+      doc.text(`Data: ${new Date().toLocaleDateString("pt-BR")}`, 22, 162);
+      doc.text(`Responsável: Inspetor Velox`, 22, 172);
+
+      doc.setFontSize(9);
+      doc.setTextColor(180, 210, 190);
+      doc.text("RBAC 153 • RBAC 154 • RBAC 107", 22, 194);
+      rodape("Capa");
+
+      doc.addPage();
+      cabecalho("Sumário Executivo");
+      doc.setTextColor(20, 30, 40);
+
+      doc.setFontSize(18);
+      doc.text("Sumário", 14, 40);
+
+      doc.setFontSize(11);
+      const sumario = [
+        "1. Introdução",
+        "2. Informações gerais da inspeção",
+        "3. Indicadores de conformidade",
+        "4. Itens inspecionados",
+        "5. Observações de campo",
+        "6. Evidências fotográficas",
+      ];
+
+      let y = 55;
+      sumario.forEach((item) => {
+        doc.text(item, 20, y);
+        y += 9;
+      });
+
+      rodape("Sumário");
+
+      doc.addPage();
+      cabecalho("Introdução e Dados Gerais");
+
+      doc.setFontSize(16);
+      doc.setTextColor(10, 31, 18);
+      doc.text("1. Introdução", 14, 40);
+
+      doc.setFontSize(10);
+      doc.setTextColor(45, 55, 65);
+      const intro = doc.splitTextToSize(
+        "Este relatório consolida as informações coletadas durante a inspeção aeroportuária realizada por meio do Sistema Inteligente de Inspeção Aeroportuária da Velox Service. O documento apresenta os itens verificados, os requisitos avaliados, as observações de campo, os status de conformidade e as evidências fotográficas vinculadas a cada item inspecionado.",
+        180
+      );
+      doc.text(intro, 14, 50);
+
+      doc.setFontSize(16);
+      doc.setTextColor(10, 31, 18);
+      doc.text("2. Informações Gerais", 14, 88);
+
+      const dadosGerais = [
+        ["Aeródromo", configAerodromo.nomeAerodromo || "Não informado"],
+        ["ICAO", configAerodromo.icao || "Não informado"],
+        ["Município/UF", `${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`],
+        ["Norma", `${normaAtual.nome || normaSelecionada}`],
+        ["RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
+        ["RBAC 154", configAerodromo.codigoReferenciaRBAC154],
+        ["RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
+      ];
+
+      y = 100;
+      dadosGerais.forEach(([label, valor], index) => {
+        doc.setFillColor(index % 2 === 0 ? 248 : 255, index % 2 === 0 ? 250 : 255, index % 2 === 0 ? 252 : 255);
+        doc.rect(14, y - 6, 180, 8, "F");
+        doc.setFontSize(9);
+        doc.setTextColor(10, 31, 18);
+        doc.text(label, 18, y);
+        doc.setTextColor(45, 55, 65);
+        doc.text(String(valor), 70, y);
+        y += 9;
+      });
+
+      doc.setFontSize(16);
+      doc.setTextColor(10, 31, 18);
+      doc.text("3. Indicadores de Conformidade", 14, y + 12);
+
+      y += 24;
+      const indicadores = [
+        ["Total Aplicável", resumo.total, "0A1F12"],
+        ["Conforme", resumo.contagem["CONFORME"], "16A34A"],
+        ["Não Conforme", resumo.contagem["NÃO CONFORME"], "EF4444"],
+        ["Não Aplicável", resumo.contagem["NÃO APLICÁVEL"], "64748B"],
+        ["Não Verificado", resumo.contagem["NÃO VERIFICADO"], "C9A300"],
+      ];
+
+      indicadores.forEach(([label, valor, cor], index) => {
+        const x = 14 + index * 36;
+        doc.setFillColor(`#${cor}`);
+        doc.roundedRect(x, y, 32, 24, 3, 3, "F");
+        doc.setFontSize(13);
+        doc.setTextColor(255, 255, 255);
+        doc.text(String(valor), x + 16, y + 10, { align: "center" });
+        doc.setFontSize(6.7);
+        doc.text(label, x + 16, y + 18, { align: "center" });
+      });
+
+      rodape("Introdução");
+
+      doc.addPage();
+      cabecalho("Itens Inspecionados");
+
+      doc.setFontSize(16);
+      doc.setTextColor(10, 31, 18);
+      doc.text("4. Itens Inspecionados", 14, 40);
+
+      y = 52;
+
+      itensAplicaveis.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = respostas[chave] || {};
+        const status = resposta.status || "NÃO VERIFICADO";
+        const textoItem = item.item || item.descricao || "Item de inspeção";
+        const obs = resposta.obs || "-";
+
+        if (y > 250) {
+          doc.addPage();
+          cabecalho("Itens Inspecionados");
+          y = 38;
+        }
+
+        doc.setDrawColor(210, 215, 220);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(14, y - 5, 182, 30, 2, 2, "FD");
+
+        doc.setFontSize(8);
+        doc.setTextColor(255, 255, 255);
+        doc.setFillColor(`#${corStatus(status)}`);
+        doc.roundedRect(16, y - 2, 34, 7, 2, 2, "F");
+        doc.text(status, 33, y + 3, { align: "center" });
+
+        doc.setTextColor(10, 31, 18);
+        doc.setFontSize(8.5);
+        doc.text(String(chave), 54, y + 3);
+
+        doc.setFontSize(8);
+        doc.setTextColor(45, 55, 65);
+        doc.text(doc.splitTextToSize(textoItem, 132), 16, y + 12);
+
+        doc.setFontSize(7.5);
+        doc.setTextColor(80, 90, 100);
+        doc.text(doc.splitTextToSize(`Obs.: ${obs}`, 168), 16, y + 23);
+
+        y += 36;
+      });
+
+      rodape("Itens Inspecionados");
+
+      doc.addPage();
+      cabecalho("Observações de Campo");
+
+      doc.setFontSize(16);
+      doc.setTextColor(10, 31, 18);
+      doc.text("5. Observações", 14, 40);
+
+      y = 52;
+
+      itensAplicaveis.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = respostas[chave] || {};
+        if (!resposta.obs) return;
+
+        if (y > 260) {
+          doc.addPage();
+          cabecalho("Observações de Campo");
+          y = 38;
+        }
+
+        doc.setFontSize(9);
+        doc.setTextColor(10, 31, 18);
+        doc.text(`${chave} - ${item.item || item.descricao || "Item"}`, 14, y);
+
+        y += 6;
+
+        doc.setFontSize(8);
+        doc.setTextColor(45, 55, 65);
+        doc.text(doc.splitTextToSize(resposta.obs, 180), 14, y);
+
+        y += 18;
+      });
+
+      rodape("Observações");
+
+      doc.addPage();
+      cabecalho("Evidências Fotográficas");
+
+      doc.setFontSize(16);
+      doc.setTextColor(10, 31, 18);
+      doc.text("6. Evidências", 14, 40);
+
+      y = 52;
+
+      if (evidencias.length === 0) {
+        doc.setFontSize(10);
+        doc.setTextColor(80, 90, 100);
+        doc.text("Nenhuma evidência fotográfica foi anexada nesta inspeção.", 14, y);
+      }
+
+      evidencias.forEach((ev) => {
+        if (y > 220) {
+          doc.addPage();
+          cabecalho("Evidências Fotográficas");
+          y = 38;
+        }
+
+        doc.setDrawColor(210, 215, 220);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+
+        doc.setFontSize(9);
+        doc.setTextColor(10, 31, 18);
+        doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 2);
+
+        doc.setFontSize(8);
+        doc.setTextColor(45, 55, 65);
+        doc.text(doc.splitTextToSize(ev.itemTitulo, 95), 18, y + 10);
+
+        doc.setFontSize(7.5);
+        doc.setTextColor(80, 90, 100);
+        doc.text(doc.splitTextToSize(`Status: ${ev.status}`, 95), 18, y + 30);
+        doc.text(doc.splitTextToSize(`Observação: ${ev.observacao || "-"}`, 95), 18, y + 38);
+
+        try {
+          const formato = extensaoImagem(ev.imagem.data) === "png" ? "PNG" : "JPEG";
+          doc.addImage(ev.imagem.data, formato, 122, y - 1, 62, 46);
+        } catch (erro) {
+          console.error("Erro ao inserir imagem no PDF:", erro);
+          doc.setFontSize(8);
+          doc.setTextColor(239, 68, 68);
+          doc.text("Imagem não pôde ser renderizada.", 122, y + 15);
+        }
+
+        y += 65;
+      });
+
+      rodape("Evidências");
+
+      doc.save(`Relatorio_Inspecao_${configAerodromo.icao || "VELOX"}.pdf`);
+    } catch (erro) {
+      console.error(erro);
+      alert("Erro ao gerar PDF premium.");
+    } finally {
+      setGerandoRelatorio(false);
+    }
   }
 
   return (
@@ -958,6 +1554,28 @@ export default function App() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="grid section-space">
+            <div className="col-6">
+              <button
+                className="btn btn-dark"
+                onClick={exportarExcelPremium}
+                disabled={gerandoRelatorio}
+              >
+                {gerandoRelatorio ? "Gerando relatório..." : "Exportar Excel Premium"}
+              </button>
+            </div>
+
+            <div className="col-6">
+              <button
+                className="btn btn-secondary"
+                onClick={exportarPDFPremium}
+                disabled={gerandoRelatorio}
+              >
+                {gerandoRelatorio ? "Gerando relatório..." : "Exportar PDF Premium"}
+              </button>
+            </div>
           </div>
 
           <div className="search-box">
