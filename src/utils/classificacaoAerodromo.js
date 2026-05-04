@@ -1,16 +1,30 @@
-export function classificarAerodromo(dados) {
-  const {
-    tipoUso,
-    passageirosAno = 0,
-    comprimentoPista = 0,
-    envergaduraMaxima = 0,
-    tipoOperacaoAVSEC = [],
-  } = dados;
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function numero(valor) {
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function classificarAerodromo(dados = {}) {
+  const tipoUso = normalizarTexto(dados.tipoUso || dados.uso);
+  const passageirosAno = numero(dados.passageirosAno);
+  const comprimentoPista = numero(dados.comprimentoPista);
+  const envergaduraMaxima = numero(dados.envergaduraMaxima);
+
+  const tipoOperacaoAVSEC = Array.isArray(dados.tipoOperacaoAVSEC)
+    ? dados.tipoOperacaoAVSEC
+    : [dados.tipoOperacaoAVSEC];
 
   let rbac153 = "Não aplicável por passageiros";
   let classe153 = 0;
 
-  if (tipoUso === "Público") {
+  if (tipoUso.includes("publico")) {
     if (passageirosAno < 200000) {
       rbac153 = "Classe I";
       classe153 = 1;
@@ -27,9 +41,9 @@ export function classificarAerodromo(dados) {
   }
 
   let codigoNumero = 1;
-  if (comprimentoPista < 1200) codigoNumero = 1;
-  else if (comprimentoPista <= 1800) codigoNumero = 2;
-  else if (comprimentoPista <= 2400) codigoNumero = 3;
+  if (comprimentoPista < 800) codigoNumero = 1;
+  else if (comprimentoPista < 1200) codigoNumero = 2;
+  else if (comprimentoPista < 1800) codigoNumero = 3;
   else codigoNumero = 4;
 
   let codigoLetra = "A";
@@ -37,18 +51,15 @@ export function classificarAerodromo(dados) {
   else if (envergaduraMaxima < 24) codigoLetra = "B";
   else if (envergaduraMaxima < 36) codigoLetra = "C";
   else if (envergaduraMaxima < 52) codigoLetra = "D";
-  else if (envergaduraMaxima <= 65) codigoLetra = "E";
+  else if (envergaduraMaxima < 65) codigoLetra = "E";
   else codigoLetra = "F";
 
-  const operacoes = Array.isArray(tipoOperacaoAVSEC)
-    ? tipoOperacaoAVSEC.map((op) => String(op).toLowerCase())
-    : [String(tipoOperacaoAVSEC).toLowerCase()];
+  const operacoes = tipoOperacaoAVSEC.map(normalizarTexto);
 
   const temPassageiros = operacoes.includes("passageiros");
   const temInternacional = operacoes.includes("internacional");
   const temCarga = operacoes.includes("carga");
-  const temDomestica =
-    operacoes.includes("doméstica") || operacoes.includes("domestica");
+  const temDomestica = operacoes.includes("domestica");
 
   let rbac107 = "Não aplicável ou aplicabilidade reduzida";
 
@@ -67,5 +78,8 @@ export function classificarAerodromo(dados) {
     classe153,
     codigoNumero,
     codigoLetra,
+    passageirosAno,
+    comprimentoPista,
+    envergaduraMaxima,
   };
 }

@@ -1,845 +1,1138 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
+import logoVelox from "./assets/logo-velox.png";
+
 import { NORMAS } from "./data/normas";
 import { CONFIG_INICIAL_RBAC154 } from "./data/configuracaoAerodromo";
 import { verificarAplicabilidade } from "./utils/aplicabilidade";
-import { buscarAerodromoPorICAO } from "./utils/buscarAerodromoPorICAO";
-import { classificarAerodromo } from "./utils/classificacaoAerodromo";
 
-function normalizarItem(item) {
-  return {
-    ref: item["REF"] ?? item.ref ?? "",
-    subparte: item["Subparte"] ?? item.subparte ?? "Sem subparte",
-    itemVerificavel: item["Item verificável"] ?? item.itemVerificavel ?? "",
-    criterio: item["Critério de conformidade"] ?? item.criterio ?? "",
-    evidencias: item["Evidências esperadas"] ?? item.evidencias ?? "",
-    risco: item["Risco associado"] ?? item.risco ?? "",
-    statusInicial: item["Status"] ?? item.statusInicial ?? "NÃO VERIFICADO",
-    observacaoInicial: item["Observação"] ?? item.observacaoInicial ?? "",
-    evidenciaInicial: item["Evidência coletada"] ?? item.evidenciaInicial ?? "",
-    responsavelInicial: item["Responsável"] ?? item.responsavelInicial ?? "",
-    prazoInicial: item["Prazo"] ?? item.prazoInicial ?? "CURTO PRAZO",
-    criticidade: item["Criticidade"] ?? item.criticidade ?? "MÉDIO",
-    aplicabilidade: item["Aplicabilidade"] ?? item.aplicabilidade ?? "APLICÁVEL",
-    motivoNA: item["Motivo N/A"] ?? item.motivoNA ?? "",
-    classeMinima: Number(item["Classe mínima"] ?? item.classeMinima ?? 0),
-    condicaoComplementar:
-      item["Condição complementar"] ?? item.condicaoComplementar ?? "Sempre",
-    regraAplicabilidade: item.regraAplicabilidade ?? null,
-  };
+import {
+  atualizarBaseANAC,
+  buscarAerodromoPorICAO,
+} from "./services/anacService";
+
+import { buscarAerodromoConsolidado } from "./data/aerodromosConsolidados";
+
+const STATUS = [
+  "NÃO VERIFICADO",
+  "CONFORME",
+  "NÃO CONFORME",
+  "NÃO APLICÁVEL",
+];
+
+const CONFIG_INICIAL = {
+  nomeAerodromo: "",
+  municipio: "",
+  uf: "",
+  icao: "",
+  usoPublico: true,
+  passageirosAno: 0,
+  classeRBAC153: "Classe I",
+  perfilClasseI: "",
+  classificacaoRBAC153: "Classe I",
+  categoriaRBAC107: "AP-0",
+  comprimentoPista: 0,
+  larguraPista: 0,
+  codigoNumero: 1,
+  codigoLetra: "B",
+  codigoReferenciaRBAC154: "1B",
+  tipoOperacao: "VFR",
+  operacaoNoturna: false,
+  internacional: false,
+  possuiPista: true,
+  possuiTaxiway: true,
+  possuiPatio: true,
+  pavimentado: false,
+  sistemaEletrico: false,
+  possuiSinalizacaoLuminosa: false,
+  possuiBalizas: false,
+  possuiObstaculos: false,
+  possuiAreaInterditada: false,
+  possuiAreaForaServico: false,
+  baixaVisibilidade: false,
+  possuiOperacaoPassageiros: true,
+  possuiOperacaoCarga: false,
+  possuiAVSEC: true,
+  fonteClassificacao: "",
+  revisaoManual: false,
+  ...CONFIG_INICIAL_RBAC154,
+};
+
+function limparTexto(valor) {
+  return String(valor || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
-const STATUS = ["CONFORME", "NÃO CONFORME", "NÃO APLICÁVEL", "NÃO VERIFICADO"];
-const PRAZOS = ["IMEDIATO", "CURTO PRAZO", "MÉDIO PRAZO", "LONGO PRAZO"];
-const CRITICIDADES = ["TODAS", "ALTO", "MÉDIO", "BAIXO"];
+function extrairNumero(valor) {
+  if (valor === null || valor === undefined) return 0;
+  const texto = String(valor).replace(",", ".").replace(/[^\d.]/g, "");
+  return Number(texto || 0);
+}
 
-function pesoCriticidade(valor) {
-  const texto = String(valor || "").toUpperCase();
-  if (texto.includes("ALTO") || texto.includes("CRÍTICO") || texto.includes("CRITICO")) return 3;
-  if (texto.includes("MÉDIO") || texto.includes("MEDIO")) return 2;
+function classificarRBAC153(passageirosAno, usoPublico) {
+  const pax = Number(passageirosAno || 0);
+  if (!usoPublico) return "Não classificado";
+  if (pax < 200000) return "Classe I";
+  if (pax < 1000000) return "Classe II";
+  if (pax < 5000000) return "Classe III";
+  return "Classe IV";
+}
+
+function classificarCodigoNumero(comprimentoPista) {
+  const comprimento = Number(comprimentoPista || 0);
+  if (comprimento >= 1800) return 4;
+  if (comprimento >= 1200) return 3;
+  if (comprimento >= 800) return 2;
   return 1;
 }
 
-function chaveStorage(aerodromo, icao, normaSelecionada) {
-  return `inspecao-${normaSelecionada}-${String(icao || aerodromo || "rascunho")
-    .trim()
-    .toLowerCase()}`;
+function montarConfigDoConsolidado(aero) {
+  if (!aero) return null;
+
+  const codigoNumero = Number(aero.codigoNumero || aero.codigoNumeroRBAC154 || 1);
+  const codigoLetra = aero.codigoLetra || aero.codigoLetraRBAC154 || "B";
+
+  return {
+    nomeAerodromo: aero.nomeAerodromo || aero.nome || "Não informado",
+    municipio: aero.municipio || "",
+    uf: aero.uf || "",
+    icao: limparTexto(aero.icao),
+    usoPublico: aero.usoPublico !== false,
+    passageirosAno: Number(aero.passageirosAno || 0),
+    classeRBAC153:
+      aero.classeRBAC153 ||
+      classificarRBAC153(Number(aero.passageirosAno || 0), aero.usoPublico !== false),
+    perfilClasseI: aero.perfilClasseI || "",
+    classificacaoRBAC153:
+      aero.classificacaoRBAC153 ||
+      [aero.classeRBAC153, aero.perfilClasseI ? `-${aero.perfilClasseI}` : ""]
+        .join("")
+        .trim(),
+    categoriaRBAC107: aero.categoriaRBAC107 || aero.classeRBAC107 || "AP-0",
+    comprimentoPista: Number(aero.comprimentoPista || 0),
+    larguraPista: Number(aero.larguraPista || 0),
+    codigoNumero,
+    codigoLetra,
+    codigoReferenciaRBAC154:
+      aero.codigoReferenciaRBAC154 || `${codigoNumero}${codigoLetra}`,
+    tipoOperacao: aero.tipoOperacao || "VFR",
+    operacaoNoturna: Boolean(aero.operacaoNoturna),
+    internacional: Boolean(aero.internacional),
+    possuiPista: true,
+    possuiTaxiway: aero.possuiTaxiway !== false,
+    possuiPatio: aero.possuiPatio !== false,
+    pavimentado: Boolean(aero.pavimentado),
+    sistemaEletrico: Boolean(aero.sistemaEletrico || aero.operacaoNoturna),
+    possuiSinalizacaoLuminosa: Boolean(
+      aero.possuiSinalizacaoLuminosa || aero.sistemaEletrico || aero.operacaoNoturna
+    ),
+    possuiBalizas: Boolean(aero.possuiBalizas || aero.operacaoNoturna),
+    possuiOperacaoPassageiros: aero.possuiOperacaoPassageiros !== false,
+    possuiOperacaoCarga: Boolean(aero.possuiOperacaoCarga),
+    possuiAVSEC: aero.possuiAVSEC !== false,
+    fonteClassificacao:
+      aero.fonteClassificacao || "Banco consolidado interno ANAC/VELOX.",
+    revisaoManual: Boolean(aero.revisaoManual),
+  };
 }
 
-function criarRespostasIniciais(checklistBase) {
-  return checklistBase.reduce((acc, item) => {
-    acc[item.ref] = {
-      status: item.statusInicial || "NÃO VERIFICADO",
-      observacao: item.observacaoInicial || "",
-      evidencia: item.evidenciaInicial || "",
-      responsavel: item.responsavelInicial || "",
-      prazo:
-        item.prazoInicial ||
-        (pesoCriticidade(item.criticidade) === 3 ? "IMEDIATO" : "CURTO PRAZO"),
-      anexo: "",
-    };
-    return acc;
-  }, {});
+function normalizarAerodromoBruto(aero, codigoDigitado) {
+  const chaves = Object.keys(aero || {});
+
+  function valorPorNome(...nomes) {
+    for (const nome of nomes) {
+      const encontrado = chaves.find(
+        (chave) => limparTexto(chave) === limparTexto(nome)
+      );
+
+      if (
+        encontrado &&
+        aero[encontrado] !== undefined &&
+        aero[encontrado] !== null &&
+        aero[encontrado] !== ""
+      ) {
+        return aero[encontrado];
+      }
+    }
+
+    return "";
+  }
+
+  function valorPorContem(...partes) {
+    for (const chave of chaves) {
+      const chaveLimpa = limparTexto(chave);
+      const bate = partes.every((parte) =>
+        chaveLimpa.includes(limparTexto(parte))
+      );
+
+      if (
+        bate &&
+        aero[chave] !== undefined &&
+        aero[chave] !== null &&
+        aero[chave] !== ""
+      ) {
+        return aero[chave];
+      }
+    }
+
+    return "";
+  }
+
+  const icao =
+    valorPorNome(
+      "icao",
+      "ICAO",
+      "CódigoOACI",
+      "Código OACI",
+      "CODIGO OACI",
+      "Código ICAO",
+      "CODIGO ICAO"
+    ) || codigoDigitado;
+
+  const nomeAerodromo =
+    valorPorNome(
+      "nomeAerodromo",
+      "Nome",
+      "nome",
+      "Aeródromo",
+      "AERODROMO",
+      "Nome do Aeródromo",
+      "NOME DO AERODROMO"
+    ) ||
+    valorPorContem("aerodromo") ||
+    valorPorContem("nome") ||
+    "Não informado";
+
+  const municipio =
+    valorPorNome("Município", "municipio", "MUNICIPIO", "cidade", "Cidade") ||
+    valorPorContem("municipio") ||
+    valorPorContem("cidade") ||
+    "";
+
+  const uf =
+    valorPorNome("UF", "uf", "estado", "Estado") ||
+    valorPorContem("uf") ||
+    valorPorContem("estado") ||
+    "";
+
+  const classeRBAC153 =
+    valorPorNome("Classe RBAC 153", "classeRBAC153", "CLASSIFICAÇÃO RBAC 153") ||
+    "";
+
+  const classeRBAC107 =
+    valorPorNome("Classe RBAC 107", "classeRBAC107", "Classificação AVSEC 2026") ||
+    "";
+
+  const comprimentoPista = extrairNumero(
+    valorPorNome(
+      "Comprimento1",
+      "comprimentoPista",
+      "comprimento",
+      "Comprimento",
+      "Comprimento da Pista"
+    ) ||
+      valorPorContem("comprimento") ||
+      valorPorContem("pista")
+  );
+
+  const larguraPista = extrairNumero(
+    valorPorNome("Largura1", "larguraPista", "largura", "Largura") ||
+      valorPorContem("largura")
+  );
+
+  const operacaoTexto = limparTexto(
+    valorPorNome("OperaçãoDiurna", "Operação Diurna", "tipoOperacao") ||
+      valorPorNome("OperaçãoNoturna", "Operação Noturna") ||
+      valorPorContem("operacao")
+  );
+
+  const superficieTexto = limparTexto(
+    valorPorNome("Superfície1", "superficie", "Superfície", "pavimento") ||
+      valorPorContem("superficie") ||
+      valorPorContem("pavimento")
+  );
+
+  const noturnoTexto = limparTexto(
+    valorPorNome("OperaçãoNoturna", "Operação Noturna", "noturno") ||
+      valorPorContem("noturna") ||
+      valorPorContem("noturno")
+  );
+
+  const tipoOperacao = operacaoTexto.includes("IFR") ? "IFR" : "VFR";
+
+  const operacaoNoturna =
+    noturnoTexto.includes("VFR") ||
+    noturnoTexto.includes("IFR") ||
+    noturnoTexto.includes("NOTURN") ||
+    noturnoTexto.includes("CAT");
+
+  const pavimentado =
+    superficieTexto.includes("ASFALT") ||
+    superficieTexto.includes("CONCRET") ||
+    superficieTexto.includes("PAVIMENT");
+
+  const codigoNumero = classificarCodigoNumero(comprimentoPista);
+  let codigoLetra = codigoNumero >= 3 ? "C" : "B";
+
+  const aeronaveCritica = limparTexto(
+    valorPorNome("AERONAVE CRÍTICA", "Aeronave Crítica", "aeronaveCritica")
+  );
+
+  if (aeronaveCritica.includes("A330") || aeronaveCritica.includes("B777")) {
+    codigoLetra = "E";
+  } else if (
+    aeronaveCritica.includes("A320") ||
+    aeronaveCritica.includes("B737") ||
+    aeronaveCritica.includes("ATR") ||
+    aeronaveCritica.includes("E195")
+  ) {
+    codigoLetra = "C";
+  }
+
+  const classeFinal = classeRBAC153 || classificarRBAC153(0, true);
+
+  return {
+    nomeAerodromo,
+    icao: limparTexto(icao),
+    municipio,
+    uf,
+    usoPublico: true,
+    passageirosAno: 0,
+    classeRBAC153:
+      classeFinal.includes("I") && classeFinal.includes("B")
+        ? "Classe I"
+        : classeFinal,
+    perfilClasseI:
+      classeFinal.includes("I-B") || classeFinal.includes("121") ? "B" : "",
+    classificacaoRBAC153: classeFinal,
+    categoriaRBAC107: classeRBAC107 || "AP-0",
+    comprimentoPista,
+    larguraPista,
+    codigoNumero,
+    codigoLetra,
+    codigoReferenciaRBAC154: `${codigoNumero}${codigoLetra}`,
+    tipoOperacao,
+    operacaoNoturna,
+    internacional: false,
+    possuiPista: true,
+    possuiTaxiway: true,
+    possuiPatio: true,
+    pavimentado,
+    sistemaEletrico: operacaoNoturna,
+    possuiSinalizacaoLuminosa: operacaoNoturna,
+    possuiBalizas: operacaoNoturna,
+    possuiOperacaoPassageiros: true,
+    possuiOperacaoCarga: false,
+    possuiAVSEC: true,
+    fonteClassificacao: "Base ANAC bruta com normalização automática.",
+    revisaoManual: true,
+  };
 }
 
-function csvEscape(v) {
-  const texto = String(v ?? "").replace(/"/g, '""');
-  return `"${texto}"`;
-}
-
-function baixarArquivo(nome, conteudo, tipo = "text/plain;charset=utf-8") {
-  const blob = new Blob([conteudo], { type: tipo });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nome;
-  a.click();
-  URL.revokeObjectURL(url);
+function classeStatus(status) {
+  if (status === "CONFORME") return "conforme";
+  if (status === "NÃO CONFORME") return "nao-conforme";
+  if (status === "NÃO APLICÁVEL") return "nao-aplicavel";
+  return "pendente";
 }
 
 export default function App() {
-  const [normaSelecionada, setNormaSelecionada] = useState("RBAC154");
-  const [aerodromo, setAerodromo] = useState("Aeroporto Auditado");
+  const [normaSelecionada, setNormaSelecionada] = useState("RBAC153");
+  const [configAerodromo, setConfigAerodromo] = useState(CONFIG_INICIAL);
+  const [baseANAC, setBaseANAC] = useState([]);
   const [icao, setIcao] = useState("");
-  const [inspetor, setInspetor] = useState("");
-  const [data, setData] = useState(new Date().toISOString().slice(0, 10));
-
-  const [classe, setClasse] = useState(0);
+  const [mensagemBase, setMensagemBase] = useState("");
   const [busca, setBusca] = useState("");
-  const [subparte, setSubparte] = useState("TODAS");
-  const [statusFiltro, setStatusFiltro] = useState("TODOS");
-  const [criticidadeFiltro, setCriticidadeFiltro] = useState("TODAS");
-  const [aba, setAba] = useState("checklist");
-  const [configAerodromo, setConfigAerodromo] = useState(CONFIG_INICIAL_RBAC154);
-  const [mensagemICAO, setMensagemICAO] = useState("");
-
-  const [tipoUso, setTipoUso] = useState("");
-  const [passageirosAno, setPassageirosAno] = useState(0);
-  const [tipoAeronave, setTipoAeronave] = useState("");
-  const [comprimentoPista, setComprimentoPista] = useState(0);
-  const [envergaduraMaxima, setEnvergaduraMaxima] = useState(0);
-  const [operacaoDomestica, setOperacaoDomestica] = useState(false);
-  const [operacaoInternacional, setOperacaoInternacional] = useState(false);
-  const [operacaoCarga, setOperacaoCarga] = useState(false);
-  const [operacaoPassageiros, setOperacaoPassageiros] = useState(false);
-
-  const tipoOperacaoAVSEC = useMemo(() => {
-    const ops = [];
-    if (operacaoDomestica) ops.push("doméstica");
-    if (operacaoInternacional) ops.push("internacional");
-    if (operacaoCarga) ops.push("carga");
-    if (operacaoPassageiros) ops.push("passageiros");
-    return ops;
-  }, [operacaoDomestica, operacaoInternacional, operacaoCarga, operacaoPassageiros]);
-
-  const classificacao = useMemo(
-    () =>
-      classificarAerodromo({
-        tipoUso,
-        passageirosAno: Number(passageirosAno),
-        comprimentoPista: Number(comprimentoPista),
-        envergaduraMaxima: Number(envergaduraMaxima),
-        tipoOperacaoAVSEC,
-      }),
-    [tipoUso, passageirosAno, comprimentoPista, envergaduraMaxima, tipoOperacaoAVSEC]
-  );
-
-  const CHECKLIST = useMemo(() => {
-    const dados = NORMAS[normaSelecionada]?.dados || [];
-    return dados.map(normalizarItem);
-  }, [normaSelecionada]);
-
-  const [respostas, setRespostas] = useState(() => criarRespostasIniciais(CHECKLIST));
+  const [respostas, setRespostas] = useState({});
+  const [mostrarConfig, setMostrarConfig] = useState(false);
 
   useEffect(() => {
-    setRespostas(criarRespostasIniciais(CHECKLIST));
-    setSubparte("TODAS");
-    setStatusFiltro("TODOS");
-    setCriticidadeFiltro("TODAS");
-    setAba("checklist");
-  }, [normaSelecionada, CHECKLIST]);
+    const respostasSalvas = localStorage.getItem("respostas-inspecao");
+    const baseSalva = localStorage.getItem("baseANAC");
+    const configSalva = localStorage.getItem("config-aerodromo");
+
+    if (respostasSalvas) {
+      try {
+        setRespostas(JSON.parse(respostasSalvas));
+      } catch {
+        setRespostas({});
+      }
+    }
+
+    if (baseSalva) {
+      try {
+        setBaseANAC(JSON.parse(baseSalva));
+      } catch {
+        setBaseANAC([]);
+      }
+    }
+
+    if (configSalva) {
+      try {
+        setConfigAerodromo({
+          ...CONFIG_INICIAL,
+          ...JSON.parse(configSalva),
+        });
+      } catch {
+        setConfigAerodromo(CONFIG_INICIAL);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    if (icao.length !== 4) {
-      setMensagemICAO("");
-      return;
+    localStorage.setItem("respostas-inspecao", JSON.stringify(respostas));
+  }, [respostas]);
+
+  useEffect(() => {
+    localStorage.setItem("config-aerodromo", JSON.stringify(configAerodromo));
+  }, [configAerodromo]);
+
+  async function carregarBaseSeNecessario() {
+    if (baseANAC.length > 0) return baseANAC;
+
+    setMensagemBase("Carregando base ANAC de apoio...");
+
+    const dados = await atualizarBaseANAC();
+
+    if (Array.isArray(dados)) {
+      setBaseANAC(dados);
+      localStorage.setItem("baseANAC", JSON.stringify(dados));
+      return dados;
     }
 
-    const dados = buscarAerodromoPorICAO(icao);
+    return [];
+  }
 
-    if (!dados) {
-      setMensagemICAO("ICAO não encontrado na base local.");
-      setAerodromo("Aeroporto Auditado");
-      setTipoUso("");
-      setPassageirosAno(0);
-      setComprimentoPista(0);
-      setEnvergaduraMaxima(0);
-      setTipoAeronave("");
-      setClasse(0);
-      return;
+  async function aplicarAerodromoPorICAO(codigoInformado) {
+    try {
+      const codigo = limparTexto(codigoInformado);
+
+      if (codigo.length !== 4) return;
+
+      const consolidado = buscarAerodromoConsolidado(codigo);
+
+      if (consolidado) {
+        const config = montarConfigDoConsolidado(consolidado);
+
+        setConfigAerodromo((prev) => ({
+          ...prev,
+          ...config,
+        }));
+
+        setNormaSelecionada("RBAC153");
+
+        setMensagemBase(
+          `${config.nomeAerodromo} | ${
+            config.classificacaoRBAC153 || config.classeRBAC153
+          } | RBAC 154 ${config.codigoReferenciaRBAC154} | RBAC 107 ${
+            config.categoriaRBAC107
+          }`
+        );
+
+        return;
+      }
+
+      const base = await carregarBaseSeNecessario();
+      const aero = buscarAerodromoPorICAO(base, codigo);
+
+      if (!aero) {
+        setMensagemBase(`Aeródromo ${codigo} não encontrado na base disponível.`);
+        return;
+      }
+
+      const normalizado = normalizarAerodromoBruto(aero, codigo);
+
+      setConfigAerodromo((prev) => ({
+        ...prev,
+        ...normalizado,
+      }));
+
+      setNormaSelecionada("RBAC153");
+
+      setMensagemBase(
+        `${normalizado.nomeAerodromo} | ${
+          normalizado.classificacaoRBAC153 || normalizado.classeRBAC153
+        } | RBAC 154 ${normalizado.codigoReferenciaRBAC154} | RBAC 107 ${
+          normalizado.categoriaRBAC107
+        }`
+      );
+    } catch (erro) {
+      console.error(erro);
+      setMensagemBase("Erro ao aplicar aeródromo automaticamente.");
     }
+  }
 
-    setMensagemICAO("Dados carregados automaticamente.");
-    setAerodromo(`${dados.nome} - ${dados.cidade}/${dados.uf}`);
-    setTipoUso(dados.uso || "Público");
-    setPassageirosAno(Number(dados.passageirosAno || 0));
-    setComprimentoPista(Number(dados.comprimentoPista || 0));
-    setEnvergaduraMaxima(Number(dados.envergaduraMaxima || 0));
-    setTipoAeronave(dados.tipoAeronave || "médias");
+  useEffect(() => {
+    const codigo = limparTexto(icao);
 
-    const ops = dados.tipoOperacaoAVSEC || [];
+    if (codigo.length !== 4) return;
 
-    setOperacaoDomestica(ops.includes("doméstica") || ops.includes("domestica"));
-    setOperacaoInternacional(ops.includes("internacional"));
-    setOperacaoCarga(ops.includes("carga"));
-    setOperacaoPassageiros(ops.includes("passageiros"));
+    const timer = setTimeout(() => {
+      aplicarAerodromoPorICAO(codigo);
+    }, 400);
 
-    const resultado = classificarAerodromo({
-      tipoUso: dados.uso || "Público",
-      passageirosAno: Number(dados.passageirosAno || 0),
-      comprimentoPista: Number(dados.comprimentoPista || 0),
-      envergaduraMaxima: Number(dados.envergaduraMaxima || 0),
-      tipoOperacaoAVSEC: ops,
-    });
-
-    setClasse(resultado.classe153);
-
-    setConfigAerodromo((prev) => ({
-      ...prev,
-      codigoNumero: resultado.codigoNumero,
-      codigoLetra: resultado.codigoLetra,
-      tipoOperacao: dados.operacao === "IFR" ? "IFR_NAO_PRECISAO" : "VFR",
-      pista: true,
-      taxiway: Boolean(dados.taxiway ?? true),
-      patio: Boolean(dados.patio ?? true),
-      pavimentado: Boolean(dados.pavimentado ?? true),
-      sistemaEletrico: Boolean(dados.sistemaEletrico ?? false),
-      operacaoNoturna: Boolean(dados.operacaoNoturna ?? false),
-    }));
+    return () => clearTimeout(timer);
   }, [icao]);
 
-  useEffect(() => {
-    const salvo = localStorage.getItem(chaveStorage(aerodromo, icao, normaSelecionada));
-    if (!salvo) return;
+  const normaAtual = NORMAS[normaSelecionada] || { itens: [] };
 
-    try {
-      const dados = JSON.parse(salvo);
-      setRespostas({ ...criarRespostasIniciais(CHECKLIST), ...(dados.respostas || {}) });
-      setInspetor(dados.inspetor || "");
-      setData(dados.data || new Date().toISOString().slice(0, 10));
-      setConfigAerodromo(dados.configAerodromo || CONFIG_INICIAL_RBAC154);
-    } catch (e) {
-      console.error("Falha ao carregar rascunho", e);
-    }
-  }, [aerodromo, icao, normaSelecionada, CHECKLIST]);
+  const itensAplicaveis = useMemo(() => {
+    return (normaAtual.itens || []).filter((item) =>
+      verificarAplicabilidade(item, configAerodromo)
+    );
+  }, [normaAtual, configAerodromo]);
 
-  useEffect(() => {
-    const t = setTimeout(() => salvar(false), 600);
-    return () => clearTimeout(t);
-  }, [respostas, aerodromo, icao, inspetor, data, classe, normaSelecionada, configAerodromo]);
+  const itensVisiveis = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
 
-  const checklist = useMemo(() => {
-    return CHECKLIST.map((item, idx) => {
-      const aplicavelPorClasse = Number(classe) >= Number(item.classeMinima || 0);
-      const aplicavelPorRegra =
-        normaSelecionada === "RBAC154"
-          ? verificarAplicabilidade(item, configAerodromo)
-          : true;
+    if (!termo) return itensAplicaveis;
 
-      const aplicavelFinal = aplicavelPorClasse && aplicavelPorRegra;
-
-      return {
-        ...item,
-        idInterno: `${normaSelecionada}-${item.ref}-${idx}`,
-        aplicavelPorClasse: aplicavelFinal,
-        motivoNA: !aplicavelPorClasse
-          ? "Não aplicável pela classe automática RBAC 153"
-          : !aplicavelPorRegra
-          ? "Não aplicável pela configuração RBAC 154"
-          : "",
-      };
-    });
-  }, [CHECKLIST, classe, configAerodromo, normaSelecionada]);
-
-  const subpartes = useMemo(
-    () => ["TODAS", ...Array.from(new Set(CHECKLIST.map((i) => i.subparte)))],
-    [CHECKLIST]
-  );
-
-  const filtrados = useMemo(() => {
-    return checklist.filter((item) => {
-      const r = respostas[item.ref] || {};
-      const statusReal = item.aplicavelPorClasse
-        ? r.status || "NÃO VERIFICADO"
-        : "NÃO APLICÁVEL";
-
-      const texto = [
+    return itensAplicaveis.filter((item) =>
+      [
         item.ref,
+        item.id,
         item.subparte,
-        item.itemVerificavel,
+        item.item,
+        item.descricao,
         item.criterio,
         item.evidencias,
         item.risco,
-        item.criticidade,
       ]
         .join(" ")
-        .toLowerCase();
+        .toLowerCase()
+        .includes(termo)
+    );
+  }, [itensAplicaveis, busca]);
 
-      return (
-        texto.includes(busca.toLowerCase()) &&
-        (subparte === "TODAS" || item.subparte === subparte) &&
-        (statusFiltro === "TODOS" || statusReal === statusFiltro) &&
-        (criticidadeFiltro === "TODAS" || item.criticidade === criticidadeFiltro)
-      );
+  const resumo = useMemo(() => {
+    const contagem = STATUS.reduce((acc, status) => {
+      acc[status] = 0;
+      return acc;
+    }, {});
+
+    itensAplicaveis.forEach((item) => {
+      const chave = item.id || item.ref;
+      const status = respostas[chave]?.status || "NÃO VERIFICADO";
+      contagem[status]++;
     });
-  }, [checklist, respostas, busca, subparte, statusFiltro, criticidadeFiltro]);
-
-  const metricas = useMemo(() => {
-    const aplicaveis = checklist.filter((i) => i.aplicavelPorClasse);
-    const conformes = checklist.filter(
-      (i) => i.aplicavelPorClasse && respostas[i.ref]?.status === "CONFORME"
-    );
-    const ncs = checklist.filter(
-      (i) => i.aplicavelPorClasse && respostas[i.ref]?.status === "NÃO CONFORME"
-    );
-    const pendentes = checklist.filter(
-      (i) =>
-        i.aplicavelPorClasse &&
-        (!respostas[i.ref]?.status || respostas[i.ref]?.status === "NÃO VERIFICADO")
-    );
-    const naoAplicaveis = checklist.filter(
-      (i) => !i.aplicavelPorClasse || respostas[i.ref]?.status === "NÃO APLICÁVEL"
-    );
-    const ncAlto = ncs.filter((i) => pesoCriticidade(i.criticidade) === 3);
 
     return {
-      total: checklist.length,
-      aplicaveis: aplicaveis.length,
-      conformes: conformes.length,
-      ncs: ncs.length,
-      pendentes: pendentes.length,
-      naoAplicaveis: naoAplicaveis.length,
-      ncAlto: ncAlto.length,
-      percentual: aplicaveis.length
-        ? Math.round((conformes.length / aplicaveis.length) * 100)
-        : 0,
+      total: itensAplicaveis.length,
+      contagem,
     };
-  }, [checklist, respostas]);
+  }, [itensAplicaveis, respostas]);
 
-  const rankingNC = useMemo(
-    () =>
-      checklist
-        .filter((i) => i.aplicavelPorClasse && respostas[i.ref]?.status === "NÃO CONFORME")
-        .sort((a, b) => pesoCriticidade(b.criticidade) - pesoCriticidade(a.criticidade)),
-    [checklist, respostas]
-  );
+  function atualizarResposta(item, campo, valor) {
+    const chave = item.id || item.ref;
 
-  const naoAplicaveis = useMemo(
-    () =>
-      checklist.filter(
-        (i) => !i.aplicavelPorClasse || respostas[i.ref]?.status === "NÃO APLICÁVEL"
-      ),
-    [checklist, respostas]
-  );
-
-  function atualizar(ref, campo, valor) {
     setRespostas((prev) => ({
       ...prev,
-      [ref]: { ...(prev[ref] || {}), [campo]: valor },
+      [chave]: {
+        ...prev[chave],
+        [campo]: valor,
+      },
     }));
   }
 
-  function salvar(alertar = true) {
-    localStorage.setItem(
-      chaveStorage(aerodromo, icao, normaSelecionada),
-      JSON.stringify({
-        respostas,
-        aerodromo,
-        icao,
-        inspetor,
-        data,
-        classeAutomaticaRBAC153: classe,
-        passageirosAno,
-        normaSelecionada,
-        configAerodromo,
-        classificacao,
-        salvoEm: new Date().toISOString(),
-      })
-    );
-    if (alertar) alert("Auditoria salva neste navegador/dispositivo.");
-  }
+  function atualizarCampoConfig(campo, valor) {
+    setConfigAerodromo((prev) => {
+      const novo = {
+        ...prev,
+        [campo]: valor,
+      };
 
-  function limpar() {
-    if (!confirm("Deseja limpar todas as respostas desta auditoria?")) return;
-    setRespostas(criarRespostasIniciais(CHECKLIST));
-    localStorage.removeItem(chaveStorage(aerodromo, icao, normaSelecionada));
-  }
+      if (campo === "passageirosAno" || campo === "usoPublico") {
+        novo.classeRBAC153 = classificarRBAC153(
+          campo === "passageirosAno" ? valor : novo.passageirosAno,
+          campo === "usoPublico" ? valor : novo.usoPublico
+        );
 
-  function exportarCSV() {
-    const cabecalho = [
-      "Norma",
-      "Aeródromo",
-      "ICAO",
-      "Data",
-      "Inspetor",
-      "Classe RBAC 153",
-      "Passageiros/ano",
-      "Código RBAC 154",
-      "Aplicabilidade RBAC 107",
-      "REF",
-      "Subparte",
-      "Item verificável",
-      "Critério de conformidade",
-      "Evidências esperadas",
-      "Risco associado",
-      "Criticidade",
-      "Classe mínima",
-      "Aplicável",
-      "Motivo N/A",
-      "Status",
-      "Observação",
-      "Evidência coletada",
-      "Responsável",
-      "Prazo",
-      "Anexo/Foto",
-    ];
+        novo.classificacaoRBAC153 = novo.classeRBAC153;
+      }
 
-    const linhas = checklist.map((item) => {
-      const r = respostas[item.ref] || {};
-      const statusReal = item.aplicavelPorClasse
-        ? r.status || "NÃO VERIFICADO"
-        : "NÃO APLICÁVEL";
+      if (campo === "comprimentoPista") {
+        novo.codigoNumero = classificarCodigoNumero(valor);
+        novo.codigoReferenciaRBAC154 = `${novo.codigoNumero}${novo.codigoLetra}`;
+      }
 
-      return [
-        NORMAS[normaSelecionada]?.nome || normaSelecionada,
-        aerodromo,
-        icao,
-        data,
-        inspetor,
-        classificacao.RBAC_153,
-        passageirosAno,
-        classificacao.RBAC_154,
-        classificacao.RBAC_107,
-        item.ref,
-        item.subparte,
-        item.itemVerificavel,
-        item.criterio,
-        item.evidencias,
-        item.risco,
-        item.criticidade,
-        item.classeMinima,
-        item.aplicavelPorClasse ? "SIM" : "NÃO",
-        item.motivoNA,
-        statusReal,
-        r.observacao,
-        r.evidencia,
-        r.responsavel,
-        r.prazo,
-        r.anexo,
-      ].map(csvEscape);
+      if (campo === "codigoNumero" || campo === "codigoLetra") {
+        novo.codigoReferenciaRBAC154 = `${novo.codigoNumero}${novo.codigoLetra}`;
+      }
+
+      return novo;
     });
-
-    const csv = [cabecalho.map(csvEscape), ...linhas]
-      .map((l) => l.join(";"))
-      .join("\n");
-
-    baixarArquivo(
-      `inspecao-${normaSelecionada}-${icao || aerodromo}.csv`.replace(/\s+/g, "-"),
-      "\ufeff" + csv,
-      "text/csv;charset=utf-8"
-    );
   }
 
-  function exportarJSON() {
-    baixarArquivo(
-      `inspecao-${normaSelecionada}-${icao || aerodromo}.json`.replace(/\s+/g, "-"),
-      JSON.stringify(
-        {
-          norma: NORMAS[normaSelecionada]?.nome || normaSelecionada,
-          aerodromo,
-          icao,
-          inspetor,
-          data,
-          classeAutomaticaRBAC153: classe,
-          passageirosAno,
-          configAerodromo,
-          classificacao,
-          metricas,
-          respostas,
+  function adicionarEvidencias(item, arquivos) {
+    const chave = item.id || item.ref;
+    const listaArquivos = Array.from(arquivos || []);
+
+    listaArquivos.forEach((arquivo) => {
+      const leitor = new FileReader();
+
+      leitor.onload = () => {
+        setRespostas((prev) => {
+          const evidenciasAtuais = prev[chave]?.evidenciasAnexadas || [];
+
+          return {
+            ...prev,
+            [chave]: {
+              ...prev[chave],
+              evidenciasAnexadas: [
+                ...evidenciasAtuais,
+                {
+                  nome: arquivo.name,
+                  tipo: arquivo.type,
+                  data: leitor.result,
+                },
+              ],
+            },
+          };
+        });
+      };
+
+      leitor.readAsDataURL(arquivo);
+    });
+  }
+
+  function removerEvidencia(item, indexEvidencia) {
+    const chave = item.id || item.ref;
+
+    setRespostas((prev) => {
+      const evidenciasAtuais = prev[chave]?.evidenciasAnexadas || [];
+
+      return {
+        ...prev,
+        [chave]: {
+          ...prev[chave],
+          evidenciasAnexadas: evidenciasAtuais.filter(
+            (_, index) => index !== indexEvidencia
+          ),
         },
-        null,
-        2
-      ),
-      "application/json"
-    );
+      };
+    });
   }
 
-  const tituloNorma = NORMAS[normaSelecionada]?.nome || normaSelecionada;
+  function limparRespostas() {
+    if (!window.confirm("Deseja limpar todas as respostas da inspeção?")) return;
+
+    setRespostas({});
+    localStorage.removeItem("respostas-inspecao");
+  }
 
   return (
-    <div>
-      <header className="topbar">
-        <div>
-          <h1>🛫 App de Inspeção Aeroportuária ANAC</h1>
-          <p>{tituloNorma} • Checklist inteligente para auditoria em campo</p>
-        </div>
-        <div className="actions">
-          <button onClick={() => salvar(true)}>💾 Salvar</button>
-          <button onClick={exportarCSV}>⬇️ Exportar CSV</button>
-          <button onClick={exportarJSON}>⬇️ Exportar JSON</button>
-          <button className="danger" onClick={limpar}>
-            🗑️ Limpar
-          </button>
+    <div className="app">
+      <header className="app-header">
+        <div className="brand-area">
+          <img src={logoVelox} alt="Velox Service" className="brand-logo" />
+          <div className="brand-system">
+            <strong>Sistema Inteligente de Inspeção Aeroportuária</strong>
+            <span>RBAC 153 • RBAC 154 • RBAC 107</span>
+          </div>
         </div>
       </header>
 
-      <main>
-        <section className="panel">
-          <h2>1. Identificação automática do aeródromo</h2>
+      <section className="hero">
+        <div className="hero-content">
+          <span className="hero-tag">VELOX SERVICE • INSPEÇÃO ANAC</span>
+          <h1>Eficiência, qualidade e controle técnico para inspeções aeroportuárias.</h1>
+          <p>
+            Sistema profissional para auditoria de operação, infraestrutura e AVSEC,
+            com aplicabilidade automática por aeródromo.
+          </p>
+        </div>
+      </section>
 
-          <div className="grid2">
-            <label>
-              Código ICAO
-              <input
-                value={icao}
-                onChange={(e) => setIcao(e.target.value.toUpperCase())}
-                placeholder="Ex.: SBGO"
-                maxLength={4}
-              />
-            </label>
+      <main className="container">
+        <section className="card consulta-card">
+          <div className="grid">
+            <div className="col-8">
+              <h2 className="card-title">Consulta automática por ICAO</h2>
+              <p className="card-subtitle">
+                Digite o código ICAO para carregar automaticamente os dados do
+                aeródromo, suas classificações e a aplicabilidade das normas.
+              </p>
+            </div>
 
-            <label>
-              Aeródromo
-              <input value={aerodromo} readOnly />
-            </label>
+            <div className="col-4">
+              <div className="icao-box">
+                <span>Código ICAO</span>
+                <input
+                  value={icao}
+                  onChange={(e) => setIcao(e.target.value.toUpperCase())}
+                  placeholder="SBGO"
+                  maxLength={4}
+                />
+              </div>
+            </div>
 
-            <label>
-              Inspetor
-              <input value={inspetor} onChange={(e) => setInspetor(e.target.value)} />
-            </label>
-
-            <label>
-              Data
-              <input type="date" value={data} onChange={(e) => setData(e.target.value)} />
-            </label>
-          </div>
-
-          {mensagemICAO && <p><b>{mensagemICAO}</b></p>}
-        </section>
-
-        <section className="panel">
-          <h2>2. Dados automáticos do aeródromo</h2>
-
-          <div className="grid2">
-            <label>
-              Tipo de uso
-              <input value={tipoUso || "Não informado"} readOnly />
-            </label>
-
-            <label>
-              Passageiros processados por ano
-              <input type="number" value={passageirosAno} readOnly />
-            </label>
-
-            <label>
-              Tipo de aeronaves
-              <input value={tipoAeronave || "Não informado"} readOnly />
-            </label>
-
-            <label>
-              Comprimento da pista em metros
-              <input type="number" value={comprimentoPista} readOnly />
-            </label>
-
-            <label>
-              Envergadura máxima em metros
-              <input type="number" value={envergaduraMaxima} readOnly />
-            </label>
-
-            <label>
-              Classe automática RBAC 153
-              <input value={classificacao.RBAC_153} readOnly />
-            </label>
-          </div>
-
-          <div className="metrics">
-            <Metric titulo="RBAC 153" valor={classificacao.RBAC_153} />
-            <Metric titulo="RBAC 154" valor={classificacao.RBAC_154} />
-            <Metric titulo="RBAC 107" valor={classificacao.RBAC_107} />
-          </div>
-        </section>
-
-        <section className="panel">
-          <h2>3. Selecionar norma para inspeção</h2>
-          <div className="tabs">
-            <button
-              className={normaSelecionada === "RBAC153" ? "active" : ""}
-              onClick={() => setNormaSelecionada("RBAC153")}
-            >
-              RBAC 153 - Operação
-            </button>
-
-            <button
-              className={normaSelecionada === "RBAC154" ? "active" : ""}
-              onClick={() => setNormaSelecionada("RBAC154")}
-            >
-              RBAC 154 - Infraestrutura
-            </button>
-
-            {NORMAS.RBAC107 && (
-              <button
-                className={normaSelecionada === "RBAC107" ? "active" : ""}
-                onClick={() => setNormaSelecionada("RBAC107")}
-              >
-                RBAC 107 - AVSEC
-              </button>
+            {mensagemBase && (
+              <div className="col-12">
+                <div className="mensagem">{mensagemBase}</div>
+              </div>
             )}
           </div>
         </section>
 
-        {normaSelecionada === "RBAC154" && (
-          <section className="panel">
-            <h2>4. Configuração técnica RBAC 154</h2>
-
-            <div className="grid2">
-              <label>
-                Código de referência - número
-                <input value={configAerodromo.codigoNumero} readOnly />
-              </label>
-
-              <label>
-                Código de referência - letra
-                <input value={configAerodromo.codigoLetra} readOnly />
-              </label>
-
-              <label>
-                Tipo de operação
-                <input value={configAerodromo.tipoOperacao} readOnly />
-              </label>
-
-              <CampoSimNao label="Operação noturna" valor={configAerodromo.operacaoNoturna} disabled />
-              <CampoSimNao label="Possui pista" valor={configAerodromo.pista} disabled />
-              <CampoSimNao label="Taxiway" valor={configAerodromo.taxiway} disabled />
-              <CampoSimNao label="Pátio" valor={configAerodromo.patio} disabled />
-              <CampoSimNao label="Pista pavimentada" valor={configAerodromo.pavimentado} disabled />
-              <CampoSimNao label="Sistema elétrico" valor={configAerodromo.sistemaEletrico} disabled />
+        <section className="grid">
+          <div className="col-4">
+            <div className="metric-card">
+              <div className="metric-label">Aeródromo ativo</div>
+              <div className="metric-value">{configAerodromo.icao || "—"}</div>
+              <p>{configAerodromo.nomeAerodromo || "Nenhum aeródromo carregado"}</p>
             </div>
-          </section>
-        )}
+          </div>
 
-        <section className="metrics">
-          <Metric titulo="Conformidade" valor={`${metricas.percentual}%`} />
-          <Metric titulo="Itens" valor={metricas.total} />
-          <Metric titulo="Aplicáveis" valor={metricas.aplicaveis} />
-          <Metric titulo="Conformes" valor={metricas.conformes} ok />
-          <Metric titulo="Não conformes" valor={metricas.ncs} danger />
-          <Metric titulo="NC alto risco" valor={metricas.ncAlto} danger />
-          <Metric titulo="Pendentes" valor={metricas.pendentes} warn />
-          <Metric titulo="Não aplicáveis" valor={metricas.naoAplicaveis} />
+          <div className="col-4">
+            <div className="metric-card">
+              <div className="metric-label">Localidade</div>
+              <div className="metric-value small">
+                {configAerodromo.municipio || "—"}
+              </div>
+              <p>{configAerodromo.uf || "UF não informada"}</p>
+            </div>
+          </div>
+
+          <div className="col-4">
+            <div className="metric-card">
+              <div className="metric-label">Fonte</div>
+              <div className="metric-value small">
+                {configAerodromo.fonteClassificacao
+                  ? "Consolidada"
+                  : baseANAC.length
+                  ? `${baseANAC.length} registros`
+                  : "—"}
+              </div>
+              <p>Banco ANAC / Velox</p>
+            </div>
+          </div>
         </section>
 
-        <section className="panel filters">
-          <input
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por REF, item, critério, evidência ou risco..."
-          />
+        <section className="grid">
+          <div className="col-4">
+            <div className="metric-card">
+              <div className="metric-label">RBAC 153</div>
+              <div className="metric-value small">
+                {configAerodromo.classificacaoRBAC153 ||
+                  configAerodromo.classeRBAC153}
+              </div>
+              <p>Classificação operacional</p>
+            </div>
+          </div>
 
-          <select value={subparte} onChange={(e) => setSubparte(e.target.value)}>
-            {subpartes.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
+          <div className="col-4">
+            <div className="metric-card">
+              <div className="metric-label">RBAC 154</div>
+              <div className="metric-value">{configAerodromo.codigoReferenciaRBAC154}</div>
+              <p>
+                {configAerodromo.comprimentoPista
+                  ? `${configAerodromo.comprimentoPista} m`
+                  : "Pista não informada"}
+              </p>
+            </div>
+          </div>
 
-          <select value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)}>
-            <option>TODOS</option>
-            {STATUS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-
-          <select
-            value={criticidadeFiltro}
-            onChange={(e) => setCriticidadeFiltro(e.target.value)}
-          >
-            {CRITICIDADES.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
+          <div className="col-4">
+            <div className="metric-card">
+              <div className="metric-label">RBAC 107</div>
+              <div className="metric-value">{configAerodromo.categoriaRBAC107 || "AP-0"}</div>
+              <p>Categoria AVSEC</p>
+            </div>
+          </div>
         </section>
 
-        <nav className="tabs">
-          <button className={aba === "checklist" ? "active" : ""} onClick={() => setAba("checklist")}>Checklist</button>
-          <button className={aba === "resumo" ? "active" : ""} onClick={() => setAba("resumo")}>Resumo executivo</button>
-          <button className={aba === "ncs" ? "active" : ""} onClick={() => setAba("ncs")}>Não conformes</button>
-          <button className={aba === "na" ? "active" : ""} onClick={() => setAba("na")}>Não aplicáveis</button>
-        </nav>
+        <section className="card">
+          <div className="grid">
+            <div className="col-8">
+              <h2 className="card-title">Parâmetros de aplicabilidade</h2>
+              <p className="card-subtitle">
+                Ajuste manualmente somente quando o banco automático estiver
+                incompleto ou quando houver necessidade técnica.
+              </p>
+            </div>
 
-        {aba === "checklist" && (
-          <section className="cards">
-            {filtrados.map((item) => (
-              <ItemCard
-                key={item.idInterno}
-                item={item}
-                resposta={respostas[item.ref] || {}}
-                atualizar={atualizar}
+            <div className="col-4 align-end">
+              <button
+                className="btn btn-dark"
+                onClick={() => setMostrarConfig(!mostrarConfig)}
+              >
+                {mostrarConfig
+                  ? "Ocultar parâmetros"
+                  : "Ajustar parâmetros avançados"}
+              </button>
+            </div>
+          </div>
+
+          {mostrarConfig && (
+            <div className="grid config-grid">
+              <div className="col-4">
+                <label>
+                  Uso público
+                  <select
+                    value={configAerodromo.usoPublico ? "SIM" : "NÃO"}
+                    onChange={(e) =>
+                      atualizarCampoConfig("usoPublico", e.target.value === "SIM")
+                    }
+                  >
+                    <option>SIM</option>
+                    <option>NÃO</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Passageiros/ano
+                  <input
+                    type="number"
+                    value={configAerodromo.passageirosAno}
+                    onChange={(e) =>
+                      atualizarCampoConfig("passageirosAno", Number(e.target.value))
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Classe RBAC 153
+                  <select
+                    value={configAerodromo.classeRBAC153}
+                    onChange={(e) =>
+                      atualizarCampoConfig("classeRBAC153", e.target.value)
+                    }
+                  >
+                    <option>Classe I</option>
+                    <option>Classe II</option>
+                    <option>Classe III</option>
+                    <option>Classe IV</option>
+                    <option>Não classificado</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Comprimento da pista
+                  <input
+                    type="number"
+                    value={configAerodromo.comprimentoPista}
+                    onChange={(e) =>
+                      atualizarCampoConfig("comprimentoPista", Number(e.target.value))
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Código número RBAC 154
+                  <select
+                    value={configAerodromo.codigoNumero}
+                    onChange={(e) =>
+                      atualizarCampoConfig("codigoNumero", Number(e.target.value))
+                    }
+                  >
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Código letra RBAC 154
+                  <select
+                    value={configAerodromo.codigoLetra}
+                    onChange={(e) =>
+                      atualizarCampoConfig("codigoLetra", e.target.value)
+                    }
+                  >
+                    <option>A</option>
+                    <option>B</option>
+                    <option>C</option>
+                    <option>D</option>
+                    <option>E</option>
+                    <option>F</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Tipo de operação
+                  <select
+                    value={configAerodromo.tipoOperacao}
+                    onChange={(e) =>
+                      atualizarCampoConfig("tipoOperacao", e.target.value)
+                    }
+                  >
+                    <option>VFR</option>
+                    <option>IFR</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Operação noturna
+                  <select
+                    value={configAerodromo.operacaoNoturna ? "SIM" : "NÃO"}
+                    onChange={(e) =>
+                      atualizarCampoConfig("operacaoNoturna", e.target.value === "SIM")
+                    }
+                  >
+                    <option>SIM</option>
+                    <option>NÃO</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="col-4">
+                <label>
+                  Pavimentado
+                  <select
+                    value={configAerodromo.pavimentado ? "SIM" : "NÃO"}
+                    onChange={(e) =>
+                      atualizarCampoConfig("pavimentado", e.target.value === "SIM")
+                    }
+                  >
+                    <option>SIM</option>
+                    <option>NÃO</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="card">
+          <div className="norma-tabs">
+            {Object.values(NORMAS).map((norma) => (
+              <button
+                key={norma.id}
+                className={
+                  normaSelecionada === norma.id
+                    ? "norma-tab active"
+                    : "norma-tab"
+                }
+                onClick={() => setNormaSelecionada(norma.id)}
+              >
+                {norma.nome}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid section-space">
+            <div className="col-8">
+              <h2 className="card-title">{normaAtual.nome}</h2>
+              <p className="card-subtitle">{normaAtual.titulo}</p>
+            </div>
+
+            <div className="col-4 align-end">
+              <button className="btn btn-secondary" onClick={limparRespostas}>
+                Limpar respostas
+              </button>
+            </div>
+          </div>
+
+          <div className="grid">
+            <div className="col-4">
+              <div className="metric-card total">
+                <div className="metric-label">Total aplicável</div>
+                <div className="metric-value">{resumo.total}</div>
+              </div>
+            </div>
+
+            {STATUS.map((status) => (
+              <div className="col-4" key={status}>
+                <div className="metric-card">
+                  <div className="metric-label">{status}</div>
+                  <div className="metric-value">{resumo.contagem[status]}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="search-box">
+            <label>
+              Buscar no checklist
+              <input
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar item, referência, critério, evidência ou risco..."
               />
-            ))}
-          </section>
-        )}
+            </label>
+          </div>
+        </section>
 
-        {aba === "resumo" && (
-          <Resumo
-            aerodromo={aerodromo}
-            icao={icao}
-            inspetor={inspetor}
-            passageirosAno={passageirosAno}
-            norma={tituloNorma}
-            metricas={metricas}
-            rankingNC={rankingNC}
-            classificacao={classificacao}
-          />
-        )}
+        <section>
+          {itensVisiveis.length === 0 && (
+            <div className="card">
+              Nenhum item aplicável encontrado para os parâmetros atuais.
+            </div>
+          )}
 
-        {aba === "ncs" && (
-          <Lista titulo="Itens não conformes" itens={rankingNC} respostas={respostas} />
-        )}
+          {itensVisiveis.map((item, index) => {
+            const chave = item.id || item.ref || `${normaSelecionada}-${index}`;
+            const resposta = respostas[chave] || {};
+            const statusAtual = resposta.status || "NÃO VERIFICADO";
 
-        {aba === "na" && (
-          <Lista titulo="Itens não aplicáveis" itens={naoAplicaveis} respostas={respostas} />
-        )}
+            return (
+              <article key={chave} className="checklist-item">
+                <div className="checklist-head">
+                  <span className="item-ref">{item.ref || item.id}</span>
+                  <span className={`status-pill ${classeStatus(statusAtual)}`}>
+                    {statusAtual}
+                  </span>
+                </div>
+
+                <h3 className="item-title">
+                  {item.item || item.descricao || "Item de verificação"}
+                </h3>
+
+                {item.subparte && (
+                  <p className="item-text">
+                    <strong>Subparte:</strong> {item.subparte}
+                  </p>
+                )}
+
+                {item.descricao && item.item && (
+                  <p className="item-text">{item.descricao}</p>
+                )}
+
+                {item.criterio && (
+                  <p className="item-text">
+                    <strong>Critério:</strong> {item.criterio}
+                  </p>
+                )}
+
+                {item.evidencias && (
+                  <p className="item-text">
+                    <strong>Evidências esperadas:</strong> {item.evidencias}
+                  </p>
+                )}
+
+                {item.risco && (
+                  <p className="item-text">
+                    <strong>Risco:</strong> {item.risco}
+                  </p>
+                )}
+
+                <div className="status-row">
+                  {STATUS.map((status) => {
+                    const ativo = statusAtual === status;
+                    const classe = classeStatus(status);
+
+                    return (
+                      <button
+                        key={status}
+                        type="button"
+                        className={
+                          ativo
+                            ? `status-btn ${classe} active`
+                            : `status-btn ${classe}`
+                        }
+                        onClick={() => atualizarResposta(item, "status", status)}
+                      >
+                        {status}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid field-grid">
+                  <div className="col-6">
+                    <label>
+                      Responsável
+                      <input
+                        value={resposta.responsavel || ""}
+                        onChange={(e) =>
+                          atualizarResposta(item, "responsavel", e.target.value)
+                        }
+                        placeholder="Responsável"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="col-6">
+                    <label>
+                      Prazo
+                      <select
+                        value={resposta.prazo || ""}
+                        onChange={(e) =>
+                          atualizarResposta(item, "prazo", e.target.value)
+                        }
+                      >
+                        <option value="">Não definido</option>
+                        <option>IMEDIATO</option>
+                        <option>CURTO PRAZO</option>
+                        <option>MÉDIO PRAZO</option>
+                        <option>LONGO PRAZO</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="col-12">
+                    <div className="evidencias-box">
+                      <strong>Evidências fotográficas</strong>
+                      <p>
+                        Adicione fotos tiradas na hora ou selecione imagens da
+                        galeria do celular.
+                      </p>
+
+                      <label className="upload-evidencia">
+                        Tirar foto ou anexar imagem
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => adicionarEvidencias(item, e.target.files)}
+                        />
+                      </label>
+
+                      {resposta.evidenciasAnexadas?.length > 0 && (
+                        <div className="preview-evidencias">
+                          {resposta.evidenciasAnexadas.map((ev, indexEv) => (
+                            <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
+                              <img src={ev.data} alt={ev.nome} />
+                              <button
+                                type="button"
+                                onClick={() => removerEvidencia(item, indexEv)}
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="col-12">
+                    <label>
+                      Observações de campo
+                      <textarea
+                        value={resposta.obs || ""}
+                        onChange={(e) =>
+                          atualizarResposta(item, "obs", e.target.value)
+                        }
+                        placeholder="Observações, evidências coletadas, pendências ou recomendações..."
+                      />
+                    </label>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </section>
       </main>
     </div>
-  );
-}
-
-function CampoSimNao({ label, valor, disabled = false }) {
-  return (
-    <label>
-      {label}
-      <select value={valor ? "SIM" : "NAO"} disabled={disabled} onChange={() => {}}>
-        <option value="SIM">Sim</option>
-        <option value="NAO">Não</option>
-      </select>
-    </label>
-  );
-}
-
-function Metric({ titulo, valor, danger, ok, warn }) {
-  return (
-    <div className={`metric ${danger ? "dangerBox" : ok ? "okBox" : warn ? "warnBox" : ""}`}>
-      <span>{titulo}</span>
-      <b>{valor}</b>
-    </div>
-  );
-}
-
-function ItemCard({ item, resposta, atualizar }) {
-  const disabled = !item.aplicavelPorClasse;
-  const statusReal = disabled ? "NÃO APLICÁVEL" : resposta.status || "NÃO VERIFICADO";
-
-  return (
-    <article className={`card ${disabled ? "disabled" : ""}`}>
-      <div className="itemHead">
-        <div>
-          <span className="ref">{item.ref}</span>
-          <span className={`crit c${pesoCriticidade(item.criticidade)}`}>{item.criticidade}</span>
-          <span className="status">{statusReal}</span>
-        </div>
-        <small>
-          {item.subparte} • Classe mínima: {item.classeMinima} • Condição: {item.condicaoComplementar}
-          {item.motivoNA ? ` • Motivo N/A: ${item.motivoNA}` : ""}
-        </small>
-      </div>
-
-      <h2>{item.itemVerificavel}</h2>
-
-      <div className="info">
-        <p><b>Critério:</b> {item.criterio}</p>
-        <p><b>Evidências:</b> {item.evidencias}</p>
-        <p><b>Risco:</b> {item.risco}</p>
-      </div>
-
-      <div className="statusGrid">
-        {STATUS.map((s) => (
-          <button
-            key={s}
-            disabled={disabled && s !== "NÃO APLICÁVEL"}
-            className={statusReal === s ? "selected" : ""}
-            onClick={() => atualizar(item.ref, "status", s)}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-
-      <div className="formGrid">
-        <textarea
-          placeholder="Observação"
-          value={resposta.observacao || ""}
-          onChange={(e) => atualizar(item.ref, "observacao", e.target.value)}
-        />
-
-        <textarea
-          placeholder="Evidência coletada"
-          value={resposta.evidencia || ""}
-          onChange={(e) => atualizar(item.ref, "evidencia", e.target.value)}
-        />
-
-        <input
-          placeholder="Responsável"
-          value={resposta.responsavel || ""}
-          onChange={(e) => atualizar(item.ref, "responsavel", e.target.value)}
-        />
-
-        <select
-          value={resposta.prazo || "CURTO PRAZO"}
-          onChange={(e) => atualizar(item.ref, "prazo", e.target.value)}
-        >
-          {PRAZOS.map((p) => (
-            <option key={p}>{p}</option>
-          ))}
-        </select>
-
-        <input
-          className="full"
-          placeholder="Descrição de foto/anexo coletado"
-          value={resposta.anexo || ""}
-          onChange={(e) => atualizar(item.ref, "anexo", e.target.value)}
-        />
-      </div>
-    </article>
-  );
-}
-
-function Resumo({ aerodromo, icao, inspetor, passageirosAno, norma, metricas, rankingNC, classificacao }) {
-  return (
-    <section className="panel">
-      <h2>Resumo executivo</h2>
-
-      <p>
-        A inspeção do aeródromo <b>{aerodromo}</b> {icao && <b>({icao})</b>}, com classificação automática <b>{classificacao.RBAC_153}</b>, baseada em <b>{passageirosAno}</b> passageiros/ano, norma <b>{norma}</b>, conduzida por {inspetor || "inspetor não informado"}, apresenta <b>{metricas.percentual}%</b> de conformidade.
-      </p>
-
-      <h3>Classificação automática</h3>
-      <p><b>RBAC 153:</b> {classificacao.RBAC_153}</p>
-      <p><b>RBAC 154:</b> {classificacao.RBAC_154}</p>
-      <p><b>RBAC 107:</b> {classificacao.RBAC_107}</p>
-
-      <h3>Prioridade de ação</h3>
-      {rankingNC.length === 0 ? (
-        <p>Sem não conformidades registradas.</p>
-      ) : (
-        rankingNC.slice(0, 10).map((i) => (
-          <p key={i.ref}>
-            <b>{i.ref}</b> • {i.criticidade} • {i.itemVerificavel}
-          </p>
-        ))
-      )}
-    </section>
-  );
-}
-
-function Lista({ titulo, itens, respostas }) {
-  return (
-    <section className="panel">
-      <h2>{titulo}</h2>
-
-      {itens.length === 0 ? (
-        <p>Nenhum item nesta categoria.</p>
-      ) : (
-        itens.map((i) => (
-          <div className="listItem" key={i.idInterno || i.ref}>
-            <b>{i.ref} • {i.criticidade}</b>
-            <p>{i.itemVerificavel}</p>
-            <small>{i.subparte}</small>
-            {i.motivoNA && <p><b>Motivo N/A:</b> {i.motivoNA}</p>}
-            <p><b>Obs:</b> {respostas[i.ref]?.observacao || "-"}</p>
-            <p><b>Evidência:</b> {respostas[i.ref]?.evidencia || "-"}</p>
-          </div>
-        ))
-      )}
-    </section>
   );
 }
