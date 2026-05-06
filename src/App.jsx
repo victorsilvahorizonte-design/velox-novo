@@ -25,6 +25,15 @@ const STATUS = [
   "NÃO APLICÁVEL",
 ];
 
+const NORMAS_IDS = ["RBAC153", "RBAC154", "RBAC107"];
+
+const STORAGE_KEYS = {
+  usuarios: "velox_usuarios",
+  usuarioLogado: "velox_usuario_logado",
+  inspecoes: "velox_inspecoes",
+  baseANAC: "baseANAC",
+};
+
 const CONFIG_INICIAL = {
   nomeAerodromo: "",
   municipio: "",
@@ -62,6 +71,35 @@ const CONFIG_INICIAL = {
   revisaoManual: false,
   ...CONFIG_INICIAL_RBAC154,
 };
+
+function criarRespostasNormas() {
+  return NORMAS_IDS.reduce((acc, normaId) => {
+    acc[normaId] = {};
+    return acc;
+  }, {});
+}
+
+function safeParse(valor, fallback) {
+  try {
+    return valor ? JSON.parse(valor) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function gerarId(prefixo = "VEL") {
+  const random = Math.random().toString(36).slice(2, 9).toUpperCase();
+  return `${prefixo}-${Date.now()}-${random}`;
+}
+
+function dataBR(valor) {
+  if (!valor) return "—";
+  try {
+    return new Date(valor).toLocaleString("pt-BR");
+  } catch {
+    return "—";
+  }
+}
 
 function limparTexto(valor) {
   return String(valor || "")
@@ -152,7 +190,6 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
       const encontrado = chaves.find(
         (chave) => limparTexto(chave) === limparTexto(nome)
       );
-
       if (
         encontrado &&
         aero[encontrado] !== undefined &&
@@ -162,17 +199,13 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
         return aero[encontrado];
       }
     }
-
     return "";
   }
 
   function valorPorContem(...partes) {
     for (const chave of chaves) {
       const chaveLimpa = limparTexto(chave);
-      const bate = partes.every((parte) =>
-        chaveLimpa.includes(limparTexto(parte))
-      );
-
+      const bate = partes.every((parte) => chaveLimpa.includes(limparTexto(parte)));
       if (
         bate &&
         aero[chave] !== undefined &&
@@ -182,31 +215,15 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
         return aero[chave];
       }
     }
-
     return "";
   }
 
   const icao =
-    valorPorNome(
-      "icao",
-      "ICAO",
-      "CódigoOACI",
-      "Código OACI",
-      "CODIGO OACI",
-      "Código ICAO",
-      "CODIGO ICAO"
-    ) || codigoDigitado;
+    valorPorNome("icao", "ICAO", "CódigoOACI", "Código OACI", "CODIGO OACI", "Código ICAO", "CODIGO ICAO") ||
+    codigoDigitado;
 
   const nomeAerodromo =
-    valorPorNome(
-      "nomeAerodromo",
-      "Nome",
-      "nome",
-      "Aeródromo",
-      "AERODROMO",
-      "Nome do Aeródromo",
-      "NOME DO AERODROMO"
-    ) ||
+    valorPorNome("nomeAerodromo", "Nome", "nome", "Aeródromo", "AERODROMO", "Nome do Aeródromo", "NOME DO AERODROMO") ||
     valorPorContem("aerodromo") ||
     valorPorContem("nome") ||
     "Não informado";
@@ -224,28 +241,19 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
     "";
 
   const classeRBAC153 =
-    valorPorNome("Classe RBAC 153", "classeRBAC153", "CLASSIFICAÇÃO RBAC 153") ||
-    "";
+    valorPorNome("Classe RBAC 153", "classeRBAC153", "CLASSIFICAÇÃO RBAC 153") || "";
 
   const classeRBAC107 =
-    valorPorNome("Classe RBAC 107", "classeRBAC107", "Classificação AVSEC 2026") ||
-    "";
+    valorPorNome("Classe RBAC 107", "classeRBAC107", "Classificação AVSEC 2026") || "";
 
   const comprimentoPista = extrairNumero(
-    valorPorNome(
-      "Comprimento1",
-      "comprimentoPista",
-      "comprimento",
-      "Comprimento",
-      "Comprimento da Pista"
-    ) ||
+    valorPorNome("Comprimento1", "comprimentoPista", "comprimento", "Comprimento", "Comprimento da Pista") ||
       valorPorContem("comprimento") ||
       valorPorContem("pista")
   );
 
   const larguraPista = extrairNumero(
-    valorPorNome("Largura1", "larguraPista", "largura", "Largura") ||
-      valorPorContem("largura")
+    valorPorNome("Largura1", "larguraPista", "largura", "Largura") || valorPorContem("largura")
   );
 
   const operacaoTexto = limparTexto(
@@ -267,7 +275,6 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
   );
 
   const tipoOperacao = operacaoTexto.includes("IFR") ? "IFR" : "VFR";
-
   const operacaoNoturna =
     noturnoTexto.includes("VFR") ||
     noturnoTexto.includes("IFR") ||
@@ -306,12 +313,8 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
     uf,
     usoPublico: true,
     passageirosAno: 0,
-    classeRBAC153:
-      classeFinal.includes("I") && classeFinal.includes("B")
-        ? "Classe I"
-        : classeFinal,
-    perfilClasseI:
-      classeFinal.includes("I-B") || classeFinal.includes("121") ? "B" : "",
+    classeRBAC153: classeFinal.includes("I") && classeFinal.includes("B") ? "Classe I" : classeFinal,
+    perfilClasseI: classeFinal.includes("I-B") || classeFinal.includes("121") ? "B" : "",
     classificacaoRBAC153: classeFinal,
     categoriaRBAC107: classeRBAC107 || "AP-0",
     comprimentoPista,
@@ -372,6 +375,20 @@ function corStatus(status) {
   return "C9A300";
 }
 
+function criarSnapshotAeroporto(configAerodromo) {
+  return {
+    icao: configAerodromo.icao || "",
+    nome: configAerodromo.nomeAerodromo || "Não informado",
+    municipio: configAerodromo.municipio || "",
+    uf: configAerodromo.uf || "",
+    classificacao153: configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153 || "",
+    codigoNumero154: configAerodromo.codigoNumero,
+    codigoLetra154: configAerodromo.codigoLetra,
+    codigoReferencia154: configAerodromo.codigoReferenciaRBAC154,
+    categoria107: configAerodromo.categoriaRBAC107 || "AP-0",
+  };
+}
+
 export default function App() {
   const [normaSelecionada, setNormaSelecionada] = useState("RBAC153");
   const [configAerodromo, setConfigAerodromo] = useState(CONFIG_INICIAL);
@@ -379,85 +396,102 @@ export default function App() {
   const [icao, setIcao] = useState("");
   const [mensagemBase, setMensagemBase] = useState("");
   const [busca, setBusca] = useState("");
-  const [respostas, setRespostas] = useState({});
+  const [respostasPorNorma, setRespostasPorNorma] = useState(criarRespostasNormas);
   const [mostrarConfig, setMostrarConfig] = useState(false);
   const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
+  const [usuarios, setUsuarios] = useState([]);
+  const [usuarioLogado, setUsuarioLogado] = useState(null);
+  const [inspecoes, setInspecoes] = useState([]);
+  const [inspecaoAtualId, setInspecaoAtualId] = useState(null);
+  const [modoAuth, setModoAuth] = useState("login");
+  const [authForm, setAuthForm] = useState({
+    nomeCompleto: "",
+    email: "",
+    telefone: "",
+    cpf: "",
+    senha: "",
+  });
+  const [mostrarMinhasInspecoes, setMostrarMinhasInspecoes] = useState(true);
+  const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
+
+  const respostas = respostasPorNorma[normaSelecionada] || {};
 
   useEffect(() => {
-    const respostasSalvas = localStorage.getItem("respostas-inspecao");
-    const baseSalva = localStorage.getItem("baseANAC");
-    const configSalva = localStorage.getItem("config-aerodromo");
+    const usuariosSalvos = safeParse(localStorage.getItem(STORAGE_KEYS.usuarios), []);
+    const usuarioSessao = safeParse(localStorage.getItem(STORAGE_KEYS.usuarioLogado), null);
+    const inspecoesSalvas = safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []);
+    const baseSalva = safeParse(localStorage.getItem(STORAGE_KEYS.baseANAC), []);
 
-    if (respostasSalvas) {
-      try {
-        setRespostas(JSON.parse(respostasSalvas));
-      } catch {
-        setRespostas({});
-      }
+    setUsuarios(Array.isArray(usuariosSalvos) ? usuariosSalvos : []);
+    setInspecoes(Array.isArray(inspecoesSalvas) ? inspecoesSalvas : []);
+    setBaseANAC(Array.isArray(baseSalva) ? baseSalva : []);
+
+    if (usuarioSessao?.id && usuarioSessao?.ativo !== false) {
+      setUsuarioLogado(usuarioSessao);
     }
 
-    if (baseSalva) {
-      try {
-        setBaseANAC(JSON.parse(baseSalva));
-      } catch {
-        setBaseANAC([]);
-      }
-    }
+    const respostasAntigas = safeParse(localStorage.getItem("respostas-inspecao"), null);
+    const configAntiga = safeParse(localStorage.getItem("config-aerodromo"), null);
 
-    if (configSalva) {
-      try {
-        setConfigAerodromo({
-          ...CONFIG_INICIAL,
-          ...JSON.parse(configSalva),
-        });
-      } catch {
-        setConfigAerodromo(CONFIG_INICIAL);
-      }
+    if (respostasAntigas || configAntiga) {
+      setConfigAerodromo({ ...CONFIG_INICIAL, ...(configAntiga || {}) });
+      setRespostasPorNorma((prev) => ({
+        ...prev,
+        RBAC153: respostasAntigas || {},
+      }));
+      setMensagemBase(
+        "Dados antigos encontrados e carregados como inspeção temporária. Clique em 'Salvar inspeção' para gravar no novo modelo por aeródromo."
+      );
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("respostas-inspecao", JSON.stringify(respostas));
-  }, [respostas]);
+    localStorage.setItem(STORAGE_KEYS.usuarios, JSON.stringify(usuarios));
+  }, [usuarios]);
 
   useEffect(() => {
-    localStorage.setItem("config-aerodromo", JSON.stringify(configAerodromo));
-  }, [configAerodromo]);
+    localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(inspecoes));
+  }, [inspecoes]);
+
+  useEffect(() => {
+    if (usuarioLogado) {
+      localStorage.setItem(STORAGE_KEYS.usuarioLogado, JSON.stringify(usuarioLogado));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
+    }
+  }, [usuarioLogado]);
 
   async function carregarBaseSeNecessario() {
     if (baseANAC.length > 0) return baseANAC;
 
     setMensagemBase("Carregando base ANAC de apoio...");
-
     const dados = await atualizarBaseANAC();
 
     if (Array.isArray(dados)) {
       setBaseANAC(dados);
-      localStorage.setItem("baseANAC", JSON.stringify(dados));
+      localStorage.setItem(STORAGE_KEYS.baseANAC, JSON.stringify(dados));
       return dados;
     }
 
     return [];
   }
 
+  function aplicarConfigAerodromo(novaConfig) {
+    setConfigAerodromo((prev) => ({ ...prev, ...novaConfig }));
+    setIcao(novaConfig.icao || "");
+  }
+
   async function aplicarAerodromoPorICAO(codigoInformado) {
     try {
       const codigo = limparTexto(codigoInformado);
-
       if (codigo.length !== 4) return;
 
       const consolidado = buscarAerodromoConsolidado(codigo);
 
       if (consolidado) {
         const config = montarConfigDoConsolidado(consolidado);
-
-        setConfigAerodromo((prev) => ({
-          ...prev,
-          ...config,
-        }));
-
+        aplicarConfigAerodromo(config);
         setNormaSelecionada("RBAC153");
-
         setMensagemBase(
           `${config.nomeAerodromo} | ${
             config.classificacaoRBAC153 || config.classeRBAC153
@@ -465,7 +499,6 @@ export default function App() {
             config.categoriaRBAC107
           }`
         );
-
         return;
       }
 
@@ -478,14 +511,8 @@ export default function App() {
       }
 
       const normalizado = normalizarAerodromoBruto(aero, codigo);
-
-      setConfigAerodromo((prev) => ({
-        ...prev,
-        ...normalizado,
-      }));
-
+      aplicarConfigAerodromo(normalizado);
       setNormaSelecionada("RBAC153");
-
       setMensagemBase(
         `${normalizado.nomeAerodromo} | ${
           normalizado.classificacaoRBAC153 || normalizado.classeRBAC153
@@ -501,7 +528,6 @@ export default function App() {
 
   useEffect(() => {
     const codigo = limparTexto(icao);
-
     if (codigo.length !== 4) return;
 
     const timer = setTimeout(() => {
@@ -513,77 +539,142 @@ export default function App() {
 
   const normaAtual = NORMAS[normaSelecionada] || { itens: [] };
 
-  const itensAplicaveis = useMemo(() => {
-    return (normaAtual.itens || []).filter((item) =>
-      verificarAplicabilidade(item, configAerodromo)
-    );
-  }, [normaAtual, configAerodromo]);
+  function itensAplicaveisDaNorma(normaId) {
+    const norma = NORMAS[normaId] || { itens: [] };
+    return (norma.itens || []).filter((item) => verificarAplicabilidade(item, configAerodromo));
+  }
+
+  const itensAplicaveis = useMemo(() => itensAplicaveisDaNorma(normaSelecionada), [normaSelecionada, configAerodromo]);
 
   const itensVisiveis = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-
     if (!termo) return itensAplicaveis;
 
     return itensAplicaveis.filter((item) =>
-      [
-        item.ref,
-        item.id,
-        item.subparte,
-        item.item,
-        item.descricao,
-        item.criterio,
-        item.evidencias,
-        item.risco,
-      ]
+      [item.ref, item.id, item.subparte, item.item, item.descricao, item.criterio, item.evidencias, item.risco]
         .join(" ")
         .toLowerCase()
         .includes(termo)
     );
   }, [itensAplicaveis, busca]);
 
-  const resumo = useMemo(() => {
+  function calcularResumoNorma(normaId, config = configAerodromo, respostasBase = respostasPorNorma[normaId] || {}) {
+    const norma = NORMAS[normaId] || { itens: [] };
+    const itens = (norma.itens || []).filter((item) => verificarAplicabilidade(item, config));
     const contagem = STATUS.reduce((acc, status) => {
       acc[status] = 0;
       return acc;
     }, {});
 
-    itensAplicaveis.forEach((item) => {
+    itens.forEach((item) => {
       const chave = item.id || item.ref;
-      const status = respostas[chave]?.status || "NÃO VERIFICADO";
+      const status = respostasBase[chave]?.status || "NÃO VERIFICADO";
       contagem[status]++;
     });
 
+    const respondidos = itens.filter((item) => {
+      const chave = item.id || item.ref;
+      const status = respostasBase[chave]?.status || "NÃO VERIFICADO";
+      return status !== "NÃO VERIFICADO";
+    }).length;
+
     return {
-      total: itensAplicaveis.length,
+      total: itens.length,
+      respondidos,
+      percentual: itens.length ? Math.round((respondidos / itens.length) * 100) : 0,
       contagem,
     };
-  }, [itensAplicaveis, respostas]);
+  }
+
+  const resumo = useMemo(
+    () => calcularResumoNorma(normaSelecionada),
+    [normaSelecionada, configAerodromo, respostasPorNorma]
+  );
+
+  const resumoGeral = useMemo(() => {
+    const base = STATUS.reduce((acc, status) => {
+      acc[status] = 0;
+      return acc;
+    }, {});
+
+    let total = 0;
+    let respondidos = 0;
+
+    NORMAS_IDS.forEach((normaId) => {
+      const r = calcularResumoNorma(normaId);
+      total += r.total;
+      respondidos += r.respondidos;
+      STATUS.forEach((status) => {
+        base[status] += r.contagem[status] || 0;
+      });
+    });
+
+    return {
+      total,
+      respondidos,
+      percentual: total ? Math.round((respondidos / total) * 100) : 0,
+      contagem: base,
+    };
+  }, [configAerodromo, respostasPorNorma]);
+
+  const minhasInspecoes = useMemo(() => {
+    if (!usuarioLogado?.id) return [];
+    return inspecoes
+      .filter((insp) => insp.usuarioId === usuarioLogado.id)
+      .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
+  }, [inspecoes, usuarioLogado]);
+
+  const estatisticasAdmin = useMemo(() => {
+    const totalUsuarios = usuarios.length;
+    const pendentes = usuarios.filter((u) => u.ativo === false && u.statusCadastro !== "bloqueado").length;
+    const bloqueados = usuarios.filter((u) => u.statusCadastro === "bloqueado").length;
+    const ativos = usuarios.filter((u) => u.ativo !== false).length;
+    const admins = usuarios.filter((u) => u.tipo === "admin").length;
+    const concluidas = inspecoes.filter((i) => i.statusGeral === "concluida").length;
+
+    return {
+      totalUsuarios,
+      ativos,
+      pendentes,
+      bloqueados,
+      admins,
+      totalInspecoes: inspecoes.length,
+      concluidas,
+      emAndamento: inspecoes.length - concluidas,
+    };
+  }, [usuarios, inspecoes]);
+
+  const inspecoesUsuarioAdmin = useMemo(() => {
+    if (!adminUsuarioSelecionado) return [];
+    return inspecoes
+      .filter((insp) => insp.usuarioId === adminUsuarioSelecionado)
+      .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
+  }, [inspecoes, adminUsuarioSelecionado]);
 
   function atualizarResposta(item, campo, valor) {
     const chave = item.id || item.ref;
 
-    setRespostas((prev) => ({
+    setRespostasPorNorma((prev) => ({
       ...prev,
-      [chave]: {
-        ...prev[chave],
-        [campo]: valor,
+      [normaSelecionada]: {
+        ...(prev[normaSelecionada] || {}),
+        [chave]: {
+          ...(prev[normaSelecionada]?.[chave] || {}),
+          [campo]: valor,
+        },
       },
     }));
   }
 
   function atualizarCampoConfig(campo, valor) {
     setConfigAerodromo((prev) => {
-      const novo = {
-        ...prev,
-        [campo]: valor,
-      };
+      const novo = { ...prev, [campo]: valor };
 
       if (campo === "passageirosAno" || campo === "usoPublico") {
         novo.classeRBAC153 = classificarRBAC153(
           campo === "passageirosAno" ? valor : novo.passageirosAno,
           campo === "usoPublico" ? valor : novo.usoPublico
         );
-
         novo.classificacaoRBAC153 = novo.classeRBAC153;
       }
 
@@ -608,22 +699,26 @@ export default function App() {
       const leitor = new FileReader();
 
       leitor.onload = () => {
-        setRespostas((prev) => {
-          const evidenciasAtuais = prev[chave]?.evidenciasAnexadas || [];
+        setRespostasPorNorma((prev) => {
+          const respostasNorma = prev[normaSelecionada] || {};
+          const evidenciasAtuais = respostasNorma[chave]?.evidenciasAnexadas || [];
 
           return {
             ...prev,
-            [chave]: {
-              ...prev[chave],
-              evidenciasAnexadas: [
-                ...evidenciasAtuais,
-                {
-                  nome: arquivo.name,
-                  tipo: arquivo.type,
-                  data: leitor.result,
-                  criadoEm: new Date().toISOString(),
-                },
-              ],
+            [normaSelecionada]: {
+              ...respostasNorma,
+              [chave]: {
+                ...respostasNorma[chave],
+                evidenciasAnexadas: [
+                  ...evidenciasAtuais,
+                  {
+                    nome: arquivo.name,
+                    tipo: arquivo.type,
+                    data: leitor.result,
+                    criadoEm: new Date().toISOString(),
+                  },
+                ],
+              },
             },
           };
         });
@@ -636,45 +731,69 @@ export default function App() {
   function removerEvidencia(item, indexEvidencia) {
     const chave = item.id || item.ref;
 
-    setRespostas((prev) => {
-      const evidenciasAtuais = prev[chave]?.evidenciasAnexadas || [];
+    setRespostasPorNorma((prev) => {
+      const respostasNorma = prev[normaSelecionada] || {};
+      const evidenciasAtuais = respostasNorma[chave]?.evidenciasAnexadas || [];
 
       return {
         ...prev,
-        [chave]: {
-          ...prev[chave],
-          evidenciasAnexadas: evidenciasAtuais.filter(
-            (_, index) => index !== indexEvidencia
-          ),
+        [normaSelecionada]: {
+          ...respostasNorma,
+          [chave]: {
+            ...respostasNorma[chave],
+            evidenciasAnexadas: evidenciasAtuais.filter((_, index) => index !== indexEvidencia),
+          },
         },
       };
     });
   }
 
-  function limparRespostas() {
-    if (!window.confirm("Deseja limpar todas as respostas da inspeção?")) return;
+  function limparRespostasNormaAtual() {
+    if (!window.confirm(`Deseja limpar somente as respostas da ${normaAtual.nome}?`)) return;
 
-    setRespostas({});
-    localStorage.removeItem("respostas-inspecao");
+    setRespostasPorNorma((prev) => ({
+      ...prev,
+      [normaSelecionada]: {},
+    }));
   }
 
-  function montarEvidencias() {
+  function limparInspecaoAtual() {
+    if (!window.confirm("Deseja limpar completamente a inspeção atual?")) return;
+    setConfigAerodromo(CONFIG_INICIAL);
+    setIcao("");
+    setMensagemBase("");
+    setBusca("");
+    setRespostasPorNorma(criarRespostasNormas());
+    setInspecaoAtualId(null);
+    setNormaSelecionada("RBAC153");
+  }
+
+  function montarEvidencias(todasNormas = true) {
     const lista = [];
+    const normasParaLer = todasNormas ? NORMAS_IDS : [normaSelecionada];
 
-    itensAplicaveis.forEach((item) => {
-      const chave = item.id || item.ref;
-      const resposta = respostas[chave] || {};
-      const imagens = resposta.evidenciasAnexadas || [];
+    normasParaLer.forEach((normaId) => {
+      const norma = NORMAS[normaId] || { itens: [] };
+      const respostasNorma = respostasPorNorma[normaId] || {};
+      const itens = (norma.itens || []).filter((item) => verificarAplicabilidade(item, configAerodromo));
 
-      imagens.forEach((imagem) => {
-        lista.push({
-          id: gerarIdEvidencia(lista.length),
-          itemId: chave,
-          itemTitulo: item.item || item.descricao || "Item de inspeção",
-          requisito: item.criterio || "",
-          observacao: resposta.obs || "",
-          status: resposta.status || "NÃO VERIFICADO",
-          imagem,
+      itens.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = respostasNorma[chave] || {};
+        const imagens = resposta.evidenciasAnexadas || [];
+
+        imagens.forEach((imagem) => {
+          lista.push({
+            id: gerarIdEvidencia(lista.length),
+            normaId,
+            normaNome: norma.nome || normaId,
+            itemId: chave,
+            itemTitulo: item.item || item.descricao || "Item de inspeção",
+            requisito: item.criterio || "",
+            observacao: resposta.obs || "",
+            status: resposta.status || "NÃO VERIFICADO",
+            imagem,
+          });
         });
       });
     });
@@ -682,23 +801,278 @@ export default function App() {
     return lista;
   }
 
+  function criarObjetoInspecao(idExistente = inspecaoAtualId) {
+    const agora = new Date().toISOString();
+    const existente = idExistente ? inspecoes.find((insp) => insp.id === idExistente) : null;
+    const resumoAtual = resumoGeral;
+
+    return {
+      id: idExistente || gerarId("INSP"),
+      usuarioId: usuarioLogado.id,
+      inspetorNome: usuarioLogado.nomeCompleto,
+      aeroporto: criarSnapshotAeroporto(configAerodromo),
+      configAerodromo,
+      respostasPorNorma,
+      criadoEm: existente?.criadoEm || agora,
+      atualizadoEm: agora,
+      statusGeral: resumoAtual.percentual >= 100 ? "concluida" : "em_andamento",
+      percentualConcluido: resumoAtual.percentual,
+      totalItens: resumoAtual.total,
+      totalNaoConformidades: resumoAtual.contagem["NÃO CONFORME"] || 0,
+      normas: NORMAS_IDS.reduce((acc, normaId) => {
+        const r = calcularResumoNorma(normaId);
+        acc[normaId] = {
+          respostas: respostasPorNorma[normaId] || {},
+          status: r.percentual >= 100 ? "concluida" : "em_andamento",
+          percentualConcluido: r.percentual,
+          totalItens: r.total,
+        };
+        return acc;
+      }, {}),
+    };
+  }
+
+  function salvarInspecaoAtual() {
+    if (!usuarioLogado) {
+      alert("Faça login para salvar a inspeção.");
+      return null;
+    }
+
+    if (!configAerodromo.icao && !configAerodromo.nomeAerodromo) {
+      alert("Informe ou carregue um aeródromo antes de salvar a inspeção.");
+      return null;
+    }
+
+    const objeto = criarObjetoInspecao(inspecaoAtualId);
+
+    setInspecoes((prev) => {
+      const existe = prev.some((insp) => insp.id === objeto.id);
+      if (existe) return prev.map((insp) => (insp.id === objeto.id ? objeto : insp));
+      return [objeto, ...prev];
+    });
+
+    setInspecaoAtualId(objeto.id);
+    setMensagemBase(`Inspeção salva: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
+    return objeto;
+  }
+
+  function novaInspecao() {
+    const possuiConteudo =
+      configAerodromo.icao ||
+      configAerodromo.nomeAerodromo ||
+      Object.values(respostasPorNorma).some((respostasNorma) => Object.keys(respostasNorma || {}).length > 0);
+
+    if (possuiConteudo) {
+      const deveSalvar = window.confirm("Deseja salvar a inspeção atual antes de iniciar uma nova?");
+      if (deveSalvar) {
+        const salva = salvarInspecaoAtual();
+        if (!salva) return;
+      }
+    }
+
+    setConfigAerodromo(CONFIG_INICIAL);
+    setIcao("");
+    setMensagemBase("Nova inspeção iniciada. Carregue um aeroporto pelo código ICAO.");
+    setBusca("");
+    setRespostasPorNorma(criarRespostasNormas());
+    setInspecaoAtualId(null);
+    setNormaSelecionada("RBAC153");
+  }
+
+  function abrirInspecao(inspecao) {
+    setInspecaoAtualId(inspecao.id);
+    setConfigAerodromo({ ...CONFIG_INICIAL, ...(inspecao.configAerodromo || {}) });
+    setIcao(inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "");
+    setRespostasPorNorma({ ...criarRespostasNormas(), ...(inspecao.respostasPorNorma || {}) });
+    setNormaSelecionada("RBAC153");
+    setMensagemBase(`Inspeção aberta: ${inspecao.aeroporto?.nome || "Aeródromo"}.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function duplicarInspecao(inspecao) {
+    const agora = new Date().toISOString();
+    const copia = {
+      ...inspecao,
+      id: gerarId("INSP"),
+      criadoEm: agora,
+      atualizadoEm: agora,
+      statusGeral: "em_andamento",
+      aeroporto: {
+        ...(inspecao.aeroporto || {}),
+        nome: `${inspecao.aeroporto?.nome || "Inspeção"} - Cópia`,
+      },
+    };
+    setInspecoes((prev) => [copia, ...prev]);
+    setMensagemBase("Inspeção duplicada com sucesso.");
+  }
+
+  function excluirInspecao(id) {
+    if (!window.confirm("Deseja excluir esta inspeção salva? Esta ação não poderá ser desfeita.")) return;
+    setInspecoes((prev) => prev.filter((insp) => insp.id !== id));
+    if (inspecaoAtualId === id) limparInspecaoAtual();
+  }
+
+  function excluirTodasMinhasInspecoes() {
+    if (!window.confirm("Deseja excluir TODAS as suas inspeções salvas?")) return;
+    setInspecoes((prev) => prev.filter((insp) => insp.usuarioId !== usuarioLogado.id));
+    limparInspecaoAtual();
+  }
+
+  function fazerCadastro(e) {
+    e.preventDefault();
+    const email = authForm.email.trim().toLowerCase();
+
+    if (!authForm.nomeCompleto.trim() || !email || !authForm.senha) {
+      alert("Preencha nome completo, e-mail e senha.");
+      return;
+    }
+
+    if (usuarios.some((u) => u.email === email)) {
+      alert("Já existe usuário cadastrado com este e-mail.");
+      return;
+    }
+
+    const primeiroUsuario = usuarios.length === 0;
+
+    const novoUsuario = {
+      id: gerarId("USR"),
+      nomeCompleto: authForm.nomeCompleto.trim(),
+      email,
+      telefone: authForm.telefone.trim(),
+      cpf: authForm.cpf.trim(),
+      senha: authForm.senha,
+      ativo: primeiroUsuario,
+      tipo: primeiroUsuario ? "admin" : "inspetor",
+      statusCadastro: primeiroUsuario ? "aprovado" : "pendente",
+      criadoEm: new Date().toISOString(),
+      aprovadoEm: primeiroUsuario ? new Date().toISOString() : "",
+    };
+
+    setUsuarios((prev) => [...prev, novoUsuario]);
+    setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
+
+    if (primeiroUsuario) {
+      setUsuarioLogado(novoUsuario);
+    } else {
+      alert("Cadastro enviado com sucesso. Aguarde aprovação do administrador Velox para acessar o sistema.");
+      setModoAuth("login");
+    }
+  }
+
+  function fazerLogin(e) {
+    e.preventDefault();
+    const email = authForm.email.trim().toLowerCase();
+    const usuario = usuarios.find((u) => u.email === email && u.senha === authForm.senha);
+
+    if (!usuario) {
+      alert("E-mail ou senha inválidos.");
+      return;
+    }
+
+    if (usuario.ativo === false) {
+      alert(usuario.statusCadastro === "bloqueado" ? "Usuário bloqueado pelo administrador." : "Cadastro pendente de aprovação pelo administrador Velox.");
+      return;
+    }
+
+    setUsuarioLogado(usuario);
+    setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
+  }
+
+  function sair() {
+    if (!window.confirm("Deseja sair do sistema?")) return;
+    setUsuarioLogado(null);
+    setInspecaoAtualId(null);
+    setConfigAerodromo(CONFIG_INICIAL);
+    setRespostasPorNorma(criarRespostasNormas());
+    setIcao("");
+    setMensagemBase("");
+  }
+
+  function aprovarUsuario(usuarioId) {
+    setUsuarios((prev) =>
+      prev.map((usuario) =>
+        usuario.id === usuarioId
+          ? { ...usuario, ativo: true, statusCadastro: "aprovado", aprovadoEm: new Date().toISOString() }
+          : usuario
+      )
+    );
+  }
+
+  function bloquearUsuario(usuarioId) {
+    const usuario = usuarios.find((u) => u.id === usuarioId);
+    if (!usuario || usuario.id === usuarioLogado.id) return;
+    if (!window.confirm(`Deseja bloquear o acesso de ${usuario.nomeCompleto}?`)) return;
+
+    setUsuarios((prev) =>
+      prev.map((u) =>
+        u.id === usuarioId
+          ? { ...u, ativo: false, statusCadastro: "bloqueado", bloqueadoEm: new Date().toISOString() }
+          : u
+      )
+    );
+  }
+
+  function desbloquearUsuario(usuarioId) {
+    setUsuarios((prev) =>
+      prev.map((usuario) =>
+        usuario.id === usuarioId
+          ? { ...usuario, ativo: true, statusCadastro: "aprovado", aprovadoEm: usuario.aprovadoEm || new Date().toISOString() }
+          : usuario
+      )
+    );
+  }
+
+  function excluirUsuario(usuarioId) {
+    const usuario = usuarios.find((u) => u.id === usuarioId);
+    if (!usuario || usuario.id === usuarioLogado.id) return;
+    if (!window.confirm(`Excluir o usuário ${usuario.nomeCompleto} e todas as inspeções vinculadas a ele?`)) return;
+
+    setUsuarios((prev) => prev.filter((u) => u.id !== usuarioId));
+    setInspecoes((prev) => prev.filter((insp) => insp.usuarioId !== usuarioId));
+    if (adminUsuarioSelecionado === usuarioId) setAdminUsuarioSelecionado("");
+  }
+
+  function resetarSenhaUsuario(usuarioId) {
+    const usuario = usuarios.find((u) => u.id === usuarioId);
+    if (!usuario) return;
+    const novaSenha = window.prompt(`Digite a nova senha para ${usuario.nomeCompleto}:`);
+    if (!novaSenha) return;
+    if (novaSenha.length < 4) {
+      alert("A nova senha deve ter pelo menos 4 caracteres.");
+      return;
+    }
+
+    setUsuarios((prev) =>
+      prev.map((u) => (u.id === usuarioId ? { ...u, senha: novaSenha, senhaAlteradaEm: new Date().toISOString() } : u))
+    );
+    alert("Senha alterada com sucesso.");
+  }
+
+  function alternarTipoAdmin(usuarioId) {
+    const usuario = usuarios.find((u) => u.id === usuarioId);
+    if (!usuario || usuario.id === usuarioLogado.id) return;
+    const novoTipo = usuario.tipo === "admin" ? "inspetor" : "admin";
+    if (!window.confirm(`Deseja transformar ${usuario.nomeCompleto} em ${novoTipo === "admin" ? "administrador" : "inspetor"}?`)) return;
+
+    setUsuarios((prev) =>
+      prev.map((u) => (u.id === usuarioId ? { ...u, tipo: novoTipo } : u))
+    );
+  }
+
   async function exportarExcelPremium() {
     try {
       setGerandoRelatorio(true);
+      if (configAerodromo.icao || configAerodromo.nomeAerodromo) salvarInspecaoAtual();
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "Velox Service";
       workbook.created = new Date();
 
       const logoBase64 = await urlParaBase64(logoVelox);
-      const logoId = workbook.addImage({
-        base64: logoBase64,
-        extension: extensaoImagem(logoBase64),
-      });
+      const logoId = workbook.addImage({ base64: logoBase64, extension: extensaoImagem(logoBase64) });
+      const evidencias = montarEvidencias(true);
 
-      const evidencias = montarEvidencias();
-
-      const wsResumo = workbook.addWorksheet("Resumo", {
+      const wsResumo = workbook.addWorksheet("Resumo Geral", {
         pageSetup: { paperSize: 9, orientation: "portrait" },
         headerFooter: {
           oddHeader: "&CRelatório de Inspeção Aeroportuária - Velox Service",
@@ -706,56 +1080,35 @@ export default function App() {
         },
       });
 
-      wsResumo.addImage(logoId, {
-        tl: { col: 0.2, row: 0.2 },
-        ext: { width: 210, height: 75 },
-      });
-
+      wsResumo.addImage(logoId, { tl: { col: 0.2, row: 0.2 }, ext: { width: 210, height: 75 } });
       wsResumo.mergeCells("A5:F5");
-      wsResumo.getCell("A5").value = "RELATÓRIO DE INSPEÇÃO AEROPORTUÁRIA";
-      wsResumo.getCell("A5").font = {
-        bold: true,
-        size: 18,
-        color: { argb: "FFFFFFFF" },
-      };
+      wsResumo.getCell("A5").value = "RELATÓRIO COMPLETO DE INSPEÇÃO AEROPORTUÁRIA";
+      wsResumo.getCell("A5").font = { bold: true, size: 18, color: { argb: "FFFFFFFF" } };
       wsResumo.getCell("A5").alignment = { horizontal: "center" };
-      wsResumo.getCell("A5").fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF0A1F12" },
-      };
+      wsResumo.getCell("A5").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0A1F12" } };
+      wsResumo.columns = [{ width: 30 }, { width: 62 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }];
 
       const resumoLinhas = [
         ["Data da inspeção", new Date().toLocaleDateString("pt-BR")],
         ["Aeródromo", configAerodromo.nomeAerodromo || "Não informado"],
         ["Código ICAO", configAerodromo.icao || "Não informado"],
         ["Município/UF", `${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`],
-        ["Responsável", "Inspetor Velox"],
-        ["Norma selecionada", `${normaAtual.nome || normaSelecionada} - ${normaAtual.titulo || ""}`],
-        ["Classificação RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
-        ["Código RBAC 154", configAerodromo.codigoReferenciaRBAC154],
-        ["Categoria RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
-        ["Total aplicável", resumo.total],
-        ["Conformes", resumo.contagem["CONFORME"]],
-        ["Não conformes", resumo.contagem["NÃO CONFORME"]],
-        ["Não aplicáveis", resumo.contagem["NÃO APLICÁVEL"]],
-        ["Não verificados", resumo.contagem["NÃO VERIFICADO"]],
-      ];
-
-      wsResumo.columns = [
-        { width: 28 },
-        { width: 60 },
-        { width: 18 },
-        { width: 18 },
-        { width: 18 },
-        { width: 18 },
+        ["Responsável", usuarioLogado?.nomeCompleto || "Inspetor Velox"],
+        ["RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
+        ["RBAC 154", configAerodromo.codigoReferenciaRBAC154],
+        ["RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
+        ["Total aplicável", resumoGeral.total],
+        ["Percentual concluído", `${resumoGeral.percentual}%`],
+        ["Conformes", resumoGeral.contagem["CONFORME"]],
+        ["Não conformes", resumoGeral.contagem["NÃO CONFORME"]],
+        ["Não aplicáveis", resumoGeral.contagem["NÃO APLICÁVEL"]],
+        ["Não verificados", resumoGeral.contagem["NÃO VERIFICADO"]],
       ];
 
       resumoLinhas.forEach((linha, index) => {
         const row = wsResumo.getRow(index + 7);
         row.values = linha;
         row.getCell(1).font = { bold: true, color: { argb: "FF07120B" } };
-        row.getCell(2).font = { color: { argb: "FF0F172A" } };
         row.eachCell((cell) => {
           cell.border = {
             top: { style: "thin", color: { argb: "FFD1D5DB" } },
@@ -763,92 +1116,77 @@ export default function App() {
             bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
             right: { style: "thin", color: { argb: "FFD1D5DB" } },
           };
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: index % 2 === 0 ? "FFF8FAFC" : "FFFFFFFF" },
-          };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: index % 2 === 0 ? "FFF8FAFC" : "FFFFFFFF" } };
         });
       });
 
       const wsItens = workbook.addWorksheet("Itens Inspecionados", {
         views: [{ state: "frozen", ySplit: 1 }],
-        headerFooter: {
-          oddHeader: "&CItens Inspecionados - Velox Service",
-          oddFooter: "&LRelatório Oficial&R&P de &N",
-        },
+        headerFooter: { oddHeader: "&CItens Inspecionados - Velox Service", oddFooter: "&LRelatório Oficial&R&P de &N" },
       });
 
       wsItens.columns = [
+        { header: "Norma", key: "norma", width: 16 },
         { header: "ID", key: "id", width: 18 },
         { header: "Descrição", key: "descricao", width: 48 },
-        { header: "Requisito Violado / Critério", key: "criterio", width: 48 },
+        { header: "Requisito / Critério", key: "criterio", width: 48 },
         { header: "Observações", key: "obs", width: 42 },
         { header: "Status", key: "status", width: 20 },
-        { header: "Responsável", key: "responsavel", width: 24 },
+        { header: "Responsável", key: "responsavel", width: 28 },
         { header: "Prazo", key: "prazo", width: 18 },
         { header: "Evidências", key: "evidencias", width: 24 },
       ];
 
       wsItens.getRow(1).eachCell((cell) => {
         cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FF0A1F12" },
-        };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0A1F12" } };
         cell.alignment = { horizontal: "center", vertical: "middle" };
       });
 
-      itensAplicaveis.forEach((item) => {
-        const chave = item.id || item.ref;
-        const resposta = respostas[chave] || {};
-        const evDoItem = evidencias
-          .filter((ev) => ev.itemId === chave)
-          .map((ev) => ev.id)
-          .join(", ");
+      NORMAS_IDS.forEach((normaId) => {
+        const norma = NORMAS[normaId] || { itens: [] };
+        const respostasNorma = respostasPorNorma[normaId] || {};
+        const itens = itensAplicaveisDaNorma(normaId);
 
-        const row = wsItens.addRow({
-          id: chave,
-          descricao: item.item || item.descricao || "",
-          criterio: item.criterio || item.evidencias || "",
-          obs: resposta.obs || "",
-          status: resposta.status || "NÃO VERIFICADO",
-          responsavel: resposta.responsavel || "",
-          prazo: resposta.prazo || "",
-          evidencias: evDoItem || "Sem evidência",
+        itens.forEach((item) => {
+          const chave = item.id || item.ref;
+          const resposta = respostasNorma[chave] || {};
+          const evDoItem = evidencias.filter((ev) => ev.normaId === normaId && ev.itemId === chave).map((ev) => ev.id).join(", ");
+          const status = resposta.status || "NÃO VERIFICADO";
+
+          const row = wsItens.addRow({
+            norma: norma.nome || normaId,
+            id: chave,
+            descricao: item.item || item.descricao || "",
+            criterio: item.criterio || item.evidencias || "",
+            obs: resposta.obs || "",
+            status,
+            responsavel: resposta.responsavel || usuarioLogado?.nomeCompleto || "",
+            prazo: resposta.prazo || "",
+            evidencias: evDoItem || "Sem evidência",
+          });
+
+          row.eachCell((cell) => {
+            cell.alignment = { vertical: "top", wrapText: true };
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFD1D5DB" } },
+              left: { style: "thin", color: { argb: "FFD1D5DB" } },
+              bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+              right: { style: "thin", color: { argb: "FFD1D5DB" } },
+            };
+          });
+          row.getCell(6).font = { bold: true, color: { argb: "FFFFFFFF" } };
+          row.getCell(6).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${corStatus(status)}` } };
         });
-
-        row.eachCell((cell) => {
-          cell.alignment = { vertical: "top", wrapText: true };
-          cell.border = {
-            top: { style: "thin", color: { argb: "FFD1D5DB" } },
-            left: { style: "thin", color: { argb: "FFD1D5DB" } },
-            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
-            right: { style: "thin", color: { argb: "FFD1D5DB" } },
-          };
-        });
-
-        row.getCell(5).font = {
-          bold: true,
-          color: { argb: "FFFFFFFF" },
-        };
-        row.getCell(5).fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: `FF${corStatus(resposta.status || "NÃO VERIFICADO")}` },
-        };
       });
 
-      const wsEvidencias = workbook.addWorksheet("Evidências", {
-        headerFooter: {
-          oddHeader: "&CEvidências Fotográficas - Velox Service",
-          oddFooter: "&LRegistro Fotográfico Oficial&R&P de &N",
-        },
+      const wsEvidencias = workbook.addWorksheet("Evidências Fotográficas", {
+        headerFooter: { oddHeader: "&CEvidências Fotográficas - Velox Service", oddFooter: "&LRegistro Fotográfico Oficial&R&P de &N" },
       });
 
       wsEvidencias.columns = [
         { header: "ID Evidência", key: "id", width: 18 },
+        { header: "Norma", key: "normaNome", width: 18 },
         { header: "ID Item", key: "itemId", width: 18 },
         { header: "Item Inspecionado", key: "itemTitulo", width: 48 },
         { header: "Status", key: "status", width: 20 },
@@ -858,11 +1196,7 @@ export default function App() {
 
       wsEvidencias.getRow(1).eachCell((cell) => {
         cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FF0A1F12" },
-        };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0A1F12" } };
         cell.alignment = { horizontal: "center", vertical: "middle" };
       });
 
@@ -870,15 +1204,14 @@ export default function App() {
         const rowIndex = index + 2;
         const row = wsEvidencias.addRow({
           id: ev.id,
+          normaNome: ev.normaNome,
           itemId: ev.itemId,
           itemTitulo: ev.itemTitulo,
           status: ev.status,
           observacao: ev.observacao,
           foto: "Imagem inserida ao lado",
         });
-
         row.height = 115;
-
         row.eachCell((cell) => {
           cell.alignment = { vertical: "top", wrapText: true };
           cell.border = {
@@ -890,27 +1223,17 @@ export default function App() {
         });
 
         try {
-          const imgId = workbook.addImage({
-            base64: ev.imagem.data,
-            extension: extensaoImagem(ev.imagem.data),
-          });
-
-          wsEvidencias.addImage(imgId, {
-            tl: { col: 5.1, row: rowIndex - 0.9 },
-            ext: { width: 185, height: 105 },
-          });
+          const imgId = workbook.addImage({ base64: ev.imagem.data, extension: extensaoImagem(ev.imagem.data) });
+          wsEvidencias.addImage(imgId, { tl: { col: 6.1, row: rowIndex - 0.9 }, ext: { width: 185, height: 105 } });
         } catch (erro) {
           console.error("Erro ao inserir imagem no Excel:", erro);
         }
       });
 
       const buffer = await workbook.xlsx.writeBuffer();
-
       saveAs(
-        new Blob([buffer], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        }),
-        `Relatorio_Inspecao_${configAerodromo.icao || "VELOX"}.xlsx`
+        new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+        `Relatorio_Completo_${configAerodromo.icao || "VELOX"}.xlsx`
       );
     } catch (erro) {
       console.error(erro);
@@ -923,12 +1246,13 @@ export default function App() {
   async function exportarPDFPremium() {
     try {
       setGerandoRelatorio(true);
+      if (configAerodromo.icao || configAerodromo.nomeAerodromo) salvarInspecaoAtual();
 
       const doc = new jsPDF("p", "mm", "a4");
       const largura = doc.internal.pageSize.getWidth();
       const altura = doc.internal.pageSize.getHeight();
       const logoBase64 = await urlParaBase64(logoVelox);
-      const evidencias = montarEvidencias();
+      const evidencias = montarEvidencias(true);
 
       function rodape(paginaTitulo = "") {
         doc.setFillColor(6, 19, 11);
@@ -950,92 +1274,45 @@ export default function App() {
 
       doc.setFillColor(6, 19, 11);
       doc.rect(0, 0, largura, altura, "F");
-
       doc.setFillColor(32, 196, 90);
       doc.rect(0, 0, 8, altura, "F");
-
       doc.addImage(logoBase64, "PNG", 22, 24, 78, 28);
-
       doc.setFontSize(24);
       doc.setTextColor(255, 255, 255);
-      doc.text("Relatório de Inspeção", 22, 82);
-      doc.text("Aeroportuária", 22, 94);
-
+      doc.text("Relatório Completo", 22, 82);
+      doc.text("de Inspeção Aeroportuária", 22, 94);
       doc.setFontSize(11);
       doc.setTextColor(210, 230, 218);
-      doc.text("Relatório técnico oficial com checklist, observações e evidências fotográficas.", 22, 106);
-
+      doc.text("RBAC 153 • RBAC 154 • RBAC 107 em uma única inspeção por aeródromo.", 22, 106);
       doc.setDrawColor(32, 196, 90);
       doc.line(22, 114, 185, 114);
-
       doc.setFontSize(12);
       doc.setTextColor(255, 255, 255);
       doc.text(`Aeródromo: ${configAerodromo.nomeAerodromo || "Não informado"}`, 22, 132);
       doc.text(`ICAO: ${configAerodromo.icao || "Não informado"}`, 22, 142);
       doc.text(`Município/UF: ${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`, 22, 152);
       doc.text(`Data: ${new Date().toLocaleDateString("pt-BR")}`, 22, 162);
-      doc.text(`Responsável: Inspetor Velox`, 22, 172);
-
-      doc.setFontSize(9);
-      doc.setTextColor(180, 210, 190);
-      doc.text("RBAC 153 • RBAC 154 • RBAC 107", 22, 194);
+      doc.text(`Responsável: ${usuarioLogado?.nomeCompleto || "Inspetor Velox"}`, 22, 172);
       rodape("Capa");
 
       doc.addPage();
       cabecalho("Sumário Executivo");
       doc.setTextColor(20, 30, 40);
-
       doc.setFontSize(18);
-      doc.text("Sumário", 14, 40);
-
-      doc.setFontSize(11);
-      const sumario = [
-        "1. Introdução",
-        "2. Informações gerais da inspeção",
-        "3. Indicadores de conformidade",
-        "4. Itens inspecionados",
-        "5. Observações de campo",
-        "6. Evidências fotográficas",
-      ];
-
-      let y = 55;
-      sumario.forEach((item) => {
-        doc.text(item, 20, y);
-        y += 9;
-      });
-
-      rodape("Sumário");
-
-      doc.addPage();
-      cabecalho("Introdução e Dados Gerais");
-
-      doc.setFontSize(16);
-      doc.setTextColor(10, 31, 18);
-      doc.text("1. Introdução", 14, 40);
-
-      doc.setFontSize(10);
-      doc.setTextColor(45, 55, 65);
-      const intro = doc.splitTextToSize(
-        "Este relatório consolida as informações coletadas durante a inspeção aeroportuária realizada por meio do Sistema Inteligente de Inspeção Aeroportuária da Velox Service. O documento apresenta os itens verificados, os requisitos avaliados, as observações de campo, os status de conformidade e as evidências fotográficas vinculadas a cada item inspecionado.",
-        180
-      );
-      doc.text(intro, 14, 50);
-
-      doc.setFontSize(16);
-      doc.setTextColor(10, 31, 18);
-      doc.text("2. Informações Gerais", 14, 88);
+      doc.text("Sumário Executivo", 14, 40);
 
       const dadosGerais = [
         ["Aeródromo", configAerodromo.nomeAerodromo || "Não informado"],
         ["ICAO", configAerodromo.icao || "Não informado"],
         ["Município/UF", `${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`],
-        ["Norma", `${normaAtual.nome || normaSelecionada}`],
+        ["Inspetor", usuarioLogado?.nomeCompleto || "Inspetor Velox"],
         ["RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
         ["RBAC 154", configAerodromo.codigoReferenciaRBAC154],
         ["RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
+        ["Conclusão geral", `${resumoGeral.percentual}%`],
       ];
 
-      y = 100;
+      let y = 54;
       dadosGerais.forEach(([label, valor], index) => {
         doc.setFillColor(index % 2 === 0 ? 248 : 255, index % 2 === 0 ? 250 : 255, index % 2 === 0 ? 252 : 255);
         doc.rect(14, y - 6, 180, 8, "F");
@@ -1047,17 +1324,13 @@ export default function App() {
         y += 9;
       });
 
-      doc.setFontSize(16);
-      doc.setTextColor(10, 31, 18);
-      doc.text("3. Indicadores de Conformidade", 14, y + 12);
-
-      y += 24;
+      y += 10;
       const indicadores = [
-        ["Total Aplicável", resumo.total, "0A1F12"],
-        ["Conforme", resumo.contagem["CONFORME"], "16A34A"],
-        ["Não Conforme", resumo.contagem["NÃO CONFORME"], "EF4444"],
-        ["Não Aplicável", resumo.contagem["NÃO APLICÁVEL"], "64748B"],
-        ["Não Verificado", resumo.contagem["NÃO VERIFICADO"], "C9A300"],
+        ["Total", resumoGeral.total, "0A1F12"],
+        ["Conforme", resumoGeral.contagem["CONFORME"], "16A34A"],
+        ["Não Conf.", resumoGeral.contagem["NÃO CONFORME"], "EF4444"],
+        ["N/A", resumoGeral.contagem["NÃO APLICÁVEL"], "64748B"],
+        ["Pendente", resumoGeral.contagem["NÃO VERIFICADO"], "C9A300"],
       ];
 
       indicadores.forEach(([label, valor, cor], index) => {
@@ -1070,100 +1343,61 @@ export default function App() {
         doc.setFontSize(6.7);
         doc.text(label, x + 16, y + 18, { align: "center" });
       });
+      rodape("Resumo");
 
-      rodape("Introdução");
+      NORMAS_IDS.forEach((normaId) => {
+        const norma = NORMAS[normaId] || { nome: normaId, itens: [] };
+        const respostasNorma = respostasPorNorma[normaId] || {};
+        const itens = itensAplicaveisDaNorma(normaId);
+        const resumoNorma = calcularResumoNorma(normaId);
 
-      doc.addPage();
-      cabecalho("Itens Inspecionados");
-
-      doc.setFontSize(16);
-      doc.setTextColor(10, 31, 18);
-      doc.text("4. Itens Inspecionados", 14, 40);
-
-      y = 52;
-
-      itensAplicaveis.forEach((item) => {
-        const chave = item.id || item.ref;
-        const resposta = respostas[chave] || {};
-        const status = resposta.status || "NÃO VERIFICADO";
-        const textoItem = item.item || item.descricao || "Item de inspeção";
-        const obs = resposta.obs || "-";
-
-        if (y > 250) {
-          doc.addPage();
-          cabecalho("Itens Inspecionados");
-          y = 38;
-        }
-
-        doc.setDrawColor(210, 215, 220);
-        doc.setFillColor(248, 250, 252);
-        doc.roundedRect(14, y - 5, 182, 30, 2, 2, "FD");
-
-        doc.setFontSize(8);
-        doc.setTextColor(255, 255, 255);
-        doc.setFillColor(`#${corStatus(status)}`);
-        doc.roundedRect(16, y - 2, 34, 7, 2, 2, "F");
-        doc.text(status, 33, y + 3, { align: "center" });
-
+        doc.addPage();
+        cabecalho(`${norma.nome || normaId} - Itens Inspecionados`);
+        doc.setFontSize(16);
         doc.setTextColor(10, 31, 18);
-        doc.setFontSize(8.5);
-        doc.text(String(chave), 54, y + 3);
+        doc.text(`${norma.nome || normaId} • ${resumoNorma.percentual}% concluído`, 14, 40);
+        y = 52;
 
-        doc.setFontSize(8);
-        doc.setTextColor(45, 55, 65);
-        doc.text(doc.splitTextToSize(textoItem, 132), 16, y + 12);
+        itens.forEach((item) => {
+          const chave = item.id || item.ref;
+          const resposta = respostasNorma[chave] || {};
+          const status = resposta.status || "NÃO VERIFICADO";
+          const textoItem = item.item || item.descricao || "Item de inspeção";
+          const obs = resposta.obs || "-";
 
-        doc.setFontSize(7.5);
-        doc.setTextColor(80, 90, 100);
-        doc.text(doc.splitTextToSize(`Obs.: ${obs}`, 168), 16, y + 23);
+          if (y > 250) {
+            doc.addPage();
+            cabecalho(`${norma.nome || normaId} - Itens Inspecionados`);
+            y = 38;
+          }
 
-        y += 36;
+          doc.setDrawColor(210, 215, 220);
+          doc.setFillColor(248, 250, 252);
+          doc.roundedRect(14, y - 5, 182, 30, 2, 2, "FD");
+          doc.setFontSize(7.3);
+          doc.setTextColor(255, 255, 255);
+          doc.setFillColor(`#${corStatus(status)}`);
+          doc.roundedRect(16, y - 2, 34, 7, 2, 2, "F");
+          doc.text(status, 33, y + 3, { align: "center" });
+          doc.setTextColor(10, 31, 18);
+          doc.setFontSize(8.5);
+          doc.text(String(chave), 54, y + 3);
+          doc.setFontSize(8);
+          doc.setTextColor(45, 55, 65);
+          doc.text(doc.splitTextToSize(textoItem, 132), 16, y + 12);
+          doc.setFontSize(7.5);
+          doc.setTextColor(80, 90, 100);
+          doc.text(doc.splitTextToSize(`Obs.: ${obs}`, 168), 16, y + 23);
+          y += 36;
+        });
+        rodape(norma.nome || normaId);
       });
-
-      rodape("Itens Inspecionados");
-
-      doc.addPage();
-      cabecalho("Observações de Campo");
-
-      doc.setFontSize(16);
-      doc.setTextColor(10, 31, 18);
-      doc.text("5. Observações", 14, 40);
-
-      y = 52;
-
-      itensAplicaveis.forEach((item) => {
-        const chave = item.id || item.ref;
-        const resposta = respostas[chave] || {};
-        if (!resposta.obs) return;
-
-        if (y > 260) {
-          doc.addPage();
-          cabecalho("Observações de Campo");
-          y = 38;
-        }
-
-        doc.setFontSize(9);
-        doc.setTextColor(10, 31, 18);
-        doc.text(`${chave} - ${item.item || item.descricao || "Item"}`, 14, y);
-
-        y += 6;
-
-        doc.setFontSize(8);
-        doc.setTextColor(45, 55, 65);
-        doc.text(doc.splitTextToSize(resposta.obs, 180), 14, y);
-
-        y += 18;
-      });
-
-      rodape("Observações");
 
       doc.addPage();
       cabecalho("Evidências Fotográficas");
-
       doc.setFontSize(16);
       doc.setTextColor(10, 31, 18);
-      doc.text("6. Evidências", 14, 40);
-
+      doc.text("Evidências Fotográficas", 14, 40);
       y = 52;
 
       if (evidencias.length === 0) {
@@ -1182,15 +1416,12 @@ export default function App() {
         doc.setDrawColor(210, 215, 220);
         doc.setFillColor(248, 250, 252);
         doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
-
         doc.setFontSize(9);
         doc.setTextColor(10, 31, 18);
-        doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 2);
-
+        doc.text(`${ev.id} • ${ev.normaNome} • Item ${ev.itemId}`, 18, y + 2);
         doc.setFontSize(8);
         doc.setTextColor(45, 55, 65);
         doc.text(doc.splitTextToSize(ev.itemTitulo, 95), 18, y + 10);
-
         doc.setFontSize(7.5);
         doc.setTextColor(80, 90, 100);
         doc.text(doc.splitTextToSize(`Status: ${ev.status}`, 95), 18, y + 30);
@@ -1205,19 +1436,51 @@ export default function App() {
           doc.setTextColor(239, 68, 68);
           doc.text("Imagem não pôde ser renderizada.", 122, y + 15);
         }
-
         y += 65;
       });
 
       rodape("Evidências");
-
-      doc.save(`Relatorio_Inspecao_${configAerodromo.icao || "VELOX"}.pdf`);
+      doc.save(`Relatorio_Completo_${configAerodromo.icao || "VELOX"}.pdf`);
     } catch (erro) {
       console.error(erro);
       alert("Erro ao gerar PDF premium.");
     } finally {
       setGerandoRelatorio(false);
     }
+  }
+
+  if (!usuarioLogado) {
+    return (
+      <div className="app auth-page">
+        <section className="auth-card">
+          <img src={logoVelox} alt="Velox Service" className="auth-logo" />
+          <h1>Sistema Inteligente de Inspeção Aeroportuária</h1>
+          <p>Entre ou cadastre-se para salvar inspeções por aeroporto e separar os trabalhos por inspetor.</p>
+
+          <div className="auth-tabs">
+            <button className={modoAuth === "login" ? "active" : ""} onClick={() => setModoAuth("login")}>Entrar</button>
+            <button className={modoAuth === "cadastro" ? "active" : ""} onClick={() => setModoAuth("cadastro")}>Cadastrar</button>
+          </div>
+
+          <form onSubmit={modoAuth === "login" ? fazerLogin : fazerCadastro} className="auth-form">
+            {modoAuth === "cadastro" && (
+              <>
+                <label>Nome completo<input value={authForm.nomeCompleto} onChange={(e) => setAuthForm((p) => ({ ...p, nomeCompleto: e.target.value }))} /></label>
+                <label>Telefone<input value={authForm.telefone} onChange={(e) => setAuthForm((p) => ({ ...p, telefone: e.target.value }))} /></label>
+                <label>CPF<input value={authForm.cpf} onChange={(e) => setAuthForm((p) => ({ ...p, cpf: e.target.value }))} /></label>
+              </>
+            )}
+            <label>E-mail<input type="email" value={authForm.email} onChange={(e) => setAuthForm((p) => ({ ...p, email: e.target.value }))} /></label>
+            <label>Senha<input type="password" value={authForm.senha} onChange={(e) => setAuthForm((p) => ({ ...p, senha: e.target.value }))} /></label>
+            <button className="btn btn-dark" type="submit">{modoAuth === "login" ? "Entrar no sistema" : "Criar acesso"}</button>
+          </form>
+
+          {usuarios.length === 0 && (
+            <div className="auth-alert">O primeiro usuário cadastrado será o administrador local do sistema.</div>
+          )}
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -1230,6 +1493,11 @@ export default function App() {
             <span>RBAC 153 • RBAC 154 • RBAC 107</span>
           </div>
         </div>
+        <div className="user-chip">
+          <span>{usuarioLogado.nomeCompleto}</span>
+          <small>{usuarioLogado.tipo === "admin" ? "Administrador" : "Inspetor"}</small>
+          <button type="button" onClick={sair}>Sair</button>
+        </div>
       </header>
 
       <section className="hero">
@@ -1238,272 +1506,213 @@ export default function App() {
           <h1>Eficiência, qualidade e controle técnico para inspeções aeroportuárias.</h1>
           <p>
             Sistema profissional para auditoria de operação, infraestrutura e AVSEC,
-            com aplicabilidade automática por aeródromo.
+            com salvamento único por aeródromo e aplicabilidade automática.
           </p>
         </div>
       </section>
 
       <main className="container">
+        <section className="card action-card">
+          <div className="grid">
+            <div className="col-8">
+              <h2 className="card-title">Gestão da inspeção atual</h2>
+              <p className="card-subtitle">
+                Agora a inspeção é salva por aeroporto: RBAC 153, RBAC 154 e RBAC 107 ficam dentro do mesmo processo.
+              </p>
+            </div>
+            <div className="col-4 actions-stack">
+              <button className="btn btn-dark" onClick={salvarInspecaoAtual}>Salvar inspeção</button>
+              <button className="btn btn-secondary" onClick={novaInspecao}>Nova inspeção</button>
+              <button className="btn btn-danger" onClick={limparInspecaoAtual}>Limpar atual</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="card inspections-card">
+          <div className="grid">
+            <div className="col-8">
+              <h2 className="card-title">Minhas inspeções</h2>
+              <p className="card-subtitle">
+                Abra, continue, duplique, exporte ou exclua inspeções já salvas por aeroporto.
+              </p>
+            </div>
+            <div className="col-4 align-end">
+              <button className="btn btn-secondary" onClick={() => setMostrarMinhasInspecoes(!mostrarMinhasInspecoes)}>
+                {mostrarMinhasInspecoes ? "Ocultar lista" : "Mostrar lista"}
+              </button>
+            </div>
+          </div>
+
+          {mostrarMinhasInspecoes && (
+            <div className="inspections-list">
+              {minhasInspecoes.length === 0 && <div className="empty-state">Nenhuma inspeção salva para este usuário.</div>}
+              {minhasInspecoes.map((inspecao) => (
+                <article className={inspecaoAtualId === inspecao.id ? "inspection-row active" : "inspection-row"} key={inspecao.id}>
+                  <div>
+                    <strong>{inspecao.aeroporto?.nome || "Aeródromo não informado"}</strong>
+                    <span>{inspecao.aeroporto?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || "—"}/{inspecao.aeroporto?.uf || "—"}</span>
+                    <small>Atualizada em {dataBR(inspecao.atualizadoEm)} • Inspetor: {inspecao.inspetorNome}</small>
+                  </div>
+                  <div className="inspection-progress">
+                    <b>{inspecao.percentualConcluido || 0}%</b>
+                    <small>{inspecao.statusGeral === "concluida" ? "Concluída" : "Em andamento"}</small>
+                  </div>
+                  <div className="inspection-actions">
+                    <button className="btn btn-dark" onClick={() => abrirInspecao(inspecao)}>Abrir</button>
+                    <button className="btn btn-secondary" onClick={() => duplicarInspecao(inspecao)}>Duplicar</button>
+                    <button className="btn btn-danger" onClick={() => excluirInspecao(inspecao.id)}>Excluir</button>
+                  </div>
+                </article>
+              ))}
+              {minhasInspecoes.length > 0 && (
+                <button className="btn btn-danger full-width" onClick={excluirTodasMinhasInspecoes}>Excluir todas as minhas inspeções</button>
+              )}
+            </div>
+          )}
+        </section>
+
+        {usuarioLogado.tipo === "admin" && usuarios.length > 0 && (
+          <section className="card admin-card">
+            <div className="grid">
+              <div className="col-8">
+                <h2 className="card-title">Gestão de usuários</h2>
+                <p className="card-subtitle">Aprovação, bloqueio, reset de senha, permissões administrativas e controle das inspeções cadastradas.</p>
+              </div>
+              <div className="col-4">
+                <div className="admin-status-box">
+                  <strong>{estatisticasAdmin.pendentes}</strong>
+                  <span>cadastro(s) pendente(s)</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="admin-stats-grid">
+              <div><b>{estatisticasAdmin.totalUsuarios}</b><span>Usuários</span></div>
+              <div><b>{estatisticasAdmin.ativos}</b><span>Ativos</span></div>
+              <div><b>{estatisticasAdmin.bloqueados}</b><span>Bloqueados</span></div>
+              <div><b>{estatisticasAdmin.admins}</b><span>Admins</span></div>
+              <div><b>{estatisticasAdmin.totalInspecoes}</b><span>Inspeções</span></div>
+              <div><b>{estatisticasAdmin.concluidas}</b><span>Concluídas</span></div>
+              <div><b>{estatisticasAdmin.emAndamento}</b><span>Em andamento</span></div>
+            </div>
+
+            <div className="admin-users">
+              {usuarios.map((usuario) => {
+                const totalDoUsuario = inspecoes.filter((insp) => insp.usuarioId === usuario.id).length;
+                const pendente = usuario.ativo === false && usuario.statusCadastro !== "bloqueado";
+                const bloqueado = usuario.statusCadastro === "bloqueado";
+
+                return (
+                  <div className={usuario.id === usuarioLogado.id ? "admin-user-row current" : "admin-user-row"} key={usuario.id}>
+                    <div className="admin-user-main">
+                      <strong>{usuario.nomeCompleto}</strong>
+                      <span>{usuario.email} • {usuario.telefone || "sem telefone"} • CPF {usuario.cpf || "não informado"}</span>
+                      <small>Perfil: {usuario.tipo === "admin" ? "Administrador" : "Inspetor"} • Inspeções: {totalDoUsuario}</small>
+                    </div>
+
+                    <div className="admin-user-status">
+                      <span className={bloqueado ? "admin-badge blocked" : pendente ? "admin-badge pending" : "admin-badge active"}>
+                        {bloqueado ? "Bloqueado" : pendente ? "Pendente" : "Aprovado"}
+                      </span>
+                    </div>
+
+                    <div className="admin-user-actions">
+                      {pendente && (
+                        <button className="btn btn-dark" onClick={() => aprovarUsuario(usuario.id)}>Aprovar</button>
+                      )}
+                      {bloqueado ? (
+                        <button className="btn btn-dark" onClick={() => desbloquearUsuario(usuario.id)}>Desbloquear</button>
+                      ) : (
+                        <button className="btn btn-danger" onClick={() => bloquearUsuario(usuario.id)} disabled={usuario.id === usuarioLogado.id}>Bloquear</button>
+                      )}
+                      <button className="btn btn-secondary" onClick={() => resetarSenhaUsuario(usuario.id)}>Resetar senha</button>
+                      <button className="btn btn-secondary" onClick={() => alternarTipoAdmin(usuario.id)} disabled={usuario.id === usuarioLogado.id}>
+                        {usuario.tipo === "admin" ? "Tornar inspetor" : "Tornar admin"}
+                      </button>
+                      <button className="btn btn-secondary" onClick={() => setAdminUsuarioSelecionado(adminUsuarioSelecionado === usuario.id ? "" : usuario.id)}>
+                        Ver inspeções
+                      </button>
+                      <button className="btn btn-danger" onClick={() => excluirUsuario(usuario.id)} disabled={usuario.id === usuarioLogado.id}>Excluir</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {adminUsuarioSelecionado && (
+              <div className="admin-inspections-panel">
+                <h3>Inspeções do usuário selecionado</h3>
+                {inspecoesUsuarioAdmin.length === 0 && <div className="empty-state">Nenhuma inspeção vinculada a este usuário.</div>}
+                {inspecoesUsuarioAdmin.map((inspecao) => (
+                  <article className="inspection-row" key={inspecao.id}>
+                    <div>
+                      <strong>{inspecao.aeroporto?.nome || "Aeródromo não informado"}</strong>
+                      <span>{inspecao.aeroporto?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || "—"}/{inspecao.aeroporto?.uf || "—"}</span>
+                      <small>Atualizada em {dataBR(inspecao.atualizadoEm)} • {inspecao.percentualConcluido || 0}% concluída</small>
+                    </div>
+                    <div className="inspection-actions">
+                      <button className="btn btn-dark" onClick={() => abrirInspecao(inspecao)}>Abrir</button>
+                      <button className="btn btn-secondary" onClick={() => duplicarInspecao(inspecao)}>Duplicar para mim</button>
+                      <button className="btn btn-danger" onClick={() => excluirInspecao(inspecao.id)}>Excluir</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="card consulta-card">
           <div className="grid">
             <div className="col-8">
               <h2 className="card-title">Consulta automática por ICAO</h2>
               <p className="card-subtitle">
-                Digite o código ICAO para carregar automaticamente os dados do
-                aeródromo, suas classificações e a aplicabilidade das normas.
+                Digite o código ICAO para carregar automaticamente os dados do aeródromo, classificações e aplicabilidade.
               </p>
             </div>
 
             <div className="col-4">
               <div className="icao-box">
                 <span>Código ICAO</span>
-                <input
-                  value={icao}
-                  onChange={(e) => setIcao(e.target.value.toUpperCase())}
-                  placeholder="SBGO"
-                  maxLength={4}
-                />
+                <input value={icao} onChange={(e) => setIcao(e.target.value.toUpperCase())} placeholder="SBGO" maxLength={4} />
               </div>
             </div>
 
             {mensagemBase && (
-              <div className="col-12">
-                <div className="mensagem">{mensagemBase}</div>
-              </div>
+              <div className="col-12"><div className="mensagem">{mensagemBase}</div></div>
             )}
           </div>
         </section>
 
         <section className="grid">
-          <div className="col-4">
-            <div className="metric-card">
-              <div className="metric-label">Aeródromo ativo</div>
-              <div className="metric-value">{configAerodromo.icao || "—"}</div>
-              <p>{configAerodromo.nomeAerodromo || "Nenhum aeródromo carregado"}</p>
-            </div>
-          </div>
-
-          <div className="col-4">
-            <div className="metric-card">
-              <div className="metric-label">Localidade</div>
-              <div className="metric-value small">
-                {configAerodromo.municipio || "—"}
-              </div>
-              <p>{configAerodromo.uf || "UF não informada"}</p>
-            </div>
-          </div>
-
-          <div className="col-4">
-            <div className="metric-card">
-              <div className="metric-label">Fonte</div>
-              <div className="metric-value small">
-                {configAerodromo.fonteClassificacao
-                  ? "Consolidada"
-                  : baseANAC.length
-                  ? `${baseANAC.length} registros`
-                  : "—"}
-              </div>
-              <p>Banco ANAC / Velox</p>
-            </div>
-          </div>
+          <div className="col-4"><div className="metric-card"><div className="metric-label">Aeródromo ativo</div><div className="metric-value">{configAerodromo.icao || "—"}</div><p>{configAerodromo.nomeAerodromo || "Nenhum aeródromo carregado"}</p></div></div>
+          <div className="col-4"><div className="metric-card"><div className="metric-label">Localidade</div><div className="metric-value small">{configAerodromo.municipio || "—"}</div><p>{configAerodromo.uf || "UF não informada"}</p></div></div>
+          <div className="col-4"><div className="metric-card total"><div className="metric-label">Conclusão geral</div><div className="metric-value">{resumoGeral.percentual}%</div><p>{resumoGeral.respondidos} de {resumoGeral.total} itens respondidos</p></div></div>
         </section>
 
         <section className="grid">
-          <div className="col-4">
-            <div className="metric-card">
-              <div className="metric-label">RBAC 153</div>
-              <div className="metric-value small">
-                {configAerodromo.classificacaoRBAC153 ||
-                  configAerodromo.classeRBAC153}
-              </div>
-              <p>Classificação operacional</p>
-            </div>
-          </div>
-
-          <div className="col-4">
-            <div className="metric-card">
-              <div className="metric-label">RBAC 154</div>
-              <div className="metric-value">{configAerodromo.codigoReferenciaRBAC154}</div>
-              <p>
-                {configAerodromo.comprimentoPista
-                  ? `${configAerodromo.comprimentoPista} m`
-                  : "Pista não informada"}
-              </p>
-            </div>
-          </div>
-
-          <div className="col-4">
-            <div className="metric-card">
-              <div className="metric-label">RBAC 107</div>
-              <div className="metric-value">{configAerodromo.categoriaRBAC107 || "AP-0"}</div>
-              <p>Categoria AVSEC</p>
-            </div>
-          </div>
+          <div className="col-4"><div className="metric-card"><div className="metric-label">RBAC 153</div><div className="metric-value small">{configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153}</div><p>Classificação operacional</p></div></div>
+          <div className="col-4"><div className="metric-card"><div className="metric-label">RBAC 154</div><div className="metric-value">{configAerodromo.codigoReferenciaRBAC154}</div><p>{configAerodromo.comprimentoPista ? `${configAerodromo.comprimentoPista} m` : "Pista não informada"}</p></div></div>
+          <div className="col-4"><div className="metric-card"><div className="metric-label">RBAC 107</div><div className="metric-value">{configAerodromo.categoriaRBAC107 || "AP-0"}</div><p>Categoria AVSEC</p></div></div>
         </section>
 
         <section className="card">
           <div className="grid">
-            <div className="col-8">
-              <h2 className="card-title">Parâmetros de aplicabilidade</h2>
-              <p className="card-subtitle">
-                Ajuste manualmente somente quando o banco automático estiver
-                incompleto ou quando houver necessidade técnica.
-              </p>
-            </div>
-
-            <div className="col-4 align-end">
-              <button
-                className="btn btn-dark"
-                onClick={() => setMostrarConfig(!mostrarConfig)}
-              >
-                {mostrarConfig
-                  ? "Ocultar parâmetros"
-                  : "Ajustar parâmetros avançados"}
-              </button>
-            </div>
+            <div className="col-8"><h2 className="card-title">Parâmetros de aplicabilidade</h2><p className="card-subtitle">Ajuste manualmente somente quando o banco automático estiver incompleto ou quando houver necessidade técnica.</p></div>
+            <div className="col-4 align-end"><button className="btn btn-dark" onClick={() => setMostrarConfig(!mostrarConfig)}>{mostrarConfig ? "Ocultar parâmetros" : "Ajustar parâmetros avançados"}</button></div>
           </div>
 
           {mostrarConfig && (
             <div className="grid config-grid">
-              <div className="col-4">
-                <label>
-                  Uso público
-                  <select
-                    value={configAerodromo.usoPublico ? "SIM" : "NÃO"}
-                    onChange={(e) =>
-                      atualizarCampoConfig("usoPublico", e.target.value === "SIM")
-                    }
-                  >
-                    <option>SIM</option>
-                    <option>NÃO</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Passageiros/ano
-                  <input
-                    type="number"
-                    value={configAerodromo.passageirosAno}
-                    onChange={(e) =>
-                      atualizarCampoConfig("passageirosAno", Number(e.target.value))
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Classe RBAC 153
-                  <select
-                    value={configAerodromo.classeRBAC153}
-                    onChange={(e) =>
-                      atualizarCampoConfig("classeRBAC153", e.target.value)
-                    }
-                  >
-                    <option>Classe I</option>
-                    <option>Classe II</option>
-                    <option>Classe III</option>
-                    <option>Classe IV</option>
-                    <option>Não classificado</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Comprimento da pista
-                  <input
-                    type="number"
-                    value={configAerodromo.comprimentoPista}
-                    onChange={(e) =>
-                      atualizarCampoConfig("comprimentoPista", Number(e.target.value))
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Código número RBAC 154
-                  <select
-                    value={configAerodromo.codigoNumero}
-                    onChange={(e) =>
-                      atualizarCampoConfig("codigoNumero", Number(e.target.value))
-                    }
-                  >
-                    <option value={1}>1</option>
-                    <option value={2}>2</option>
-                    <option value={3}>3</option>
-                    <option value={4}>4</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Código letra RBAC 154
-                  <select
-                    value={configAerodromo.codigoLetra}
-                    onChange={(e) =>
-                      atualizarCampoConfig("codigoLetra", e.target.value)
-                    }
-                  >
-                    <option>A</option>
-                    <option>B</option>
-                    <option>C</option>
-                    <option>D</option>
-                    <option>E</option>
-                    <option>F</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Tipo de operação
-                  <select
-                    value={configAerodromo.tipoOperacao}
-                    onChange={(e) =>
-                      atualizarCampoConfig("tipoOperacao", e.target.value)
-                    }
-                  >
-                    <option>VFR</option>
-                    <option>IFR</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Operação noturna
-                  <select
-                    value={configAerodromo.operacaoNoturna ? "SIM" : "NÃO"}
-                    onChange={(e) =>
-                      atualizarCampoConfig("operacaoNoturna", e.target.value === "SIM")
-                    }
-                  >
-                    <option>SIM</option>
-                    <option>NÃO</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="col-4">
-                <label>
-                  Pavimentado
-                  <select
-                    value={configAerodromo.pavimentado ? "SIM" : "NÃO"}
-                    onChange={(e) =>
-                      atualizarCampoConfig("pavimentado", e.target.value === "SIM")
-                    }
-                  >
-                    <option>SIM</option>
-                    <option>NÃO</option>
-                  </select>
-                </label>
-              </div>
+              <div className="col-4"><label>Uso público<select value={configAerodromo.usoPublico ? "SIM" : "NÃO"} onChange={(e) => atualizarCampoConfig("usoPublico", e.target.value === "SIM")}><option>SIM</option><option>NÃO</option></select></label></div>
+              <div className="col-4"><label>Passageiros/ano<input type="number" value={configAerodromo.passageirosAno} onChange={(e) => atualizarCampoConfig("passageirosAno", Number(e.target.value))} /></label></div>
+              <div className="col-4"><label>Classe RBAC 153<select value={configAerodromo.classeRBAC153} onChange={(e) => atualizarCampoConfig("classeRBAC153", e.target.value)}><option>Classe I</option><option>Classe II</option><option>Classe III</option><option>Classe IV</option><option>Não classificado</option></select></label></div>
+              <div className="col-4"><label>Comprimento da pista<input type="number" value={configAerodromo.comprimentoPista} onChange={(e) => atualizarCampoConfig("comprimentoPista", Number(e.target.value))} /></label></div>
+              <div className="col-4"><label>Código número RBAC 154<select value={configAerodromo.codigoNumero} onChange={(e) => atualizarCampoConfig("codigoNumero", Number(e.target.value))}><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option></select></label></div>
+              <div className="col-4"><label>Código letra RBAC 154<select value={configAerodromo.codigoLetra} onChange={(e) => atualizarCampoConfig("codigoLetra", e.target.value)}><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option><option>F</option></select></label></div>
+              <div className="col-4"><label>Tipo de operação<select value={configAerodromo.tipoOperacao} onChange={(e) => atualizarCampoConfig("tipoOperacao", e.target.value)}><option>VFR</option><option>IFR</option></select></label></div>
+              <div className="col-4"><label>Operação noturna<select value={configAerodromo.operacaoNoturna ? "SIM" : "NÃO"} onChange={(e) => atualizarCampoConfig("operacaoNoturna", e.target.value === "SIM")}><option>SIM</option><option>NÃO</option></select></label></div>
+              <div className="col-4"><label>Pavimentado<select value={configAerodromo.pavimentado ? "SIM" : "NÃO"} onChange={(e) => atualizarCampoConfig("pavimentado", e.target.value === "SIM")}><option>SIM</option><option>NÃO</option></select></label></div>
             </div>
           )}
         </section>
@@ -1511,91 +1720,30 @@ export default function App() {
         <section className="card">
           <div className="norma-tabs">
             {Object.values(NORMAS).map((norma) => (
-              <button
-                key={norma.id}
-                className={
-                  normaSelecionada === norma.id
-                    ? "norma-tab active"
-                    : "norma-tab"
-                }
-                onClick={() => setNormaSelecionada(norma.id)}
-              >
-                {norma.nome}
-              </button>
+              <button key={norma.id} className={normaSelecionada === norma.id ? "norma-tab active" : "norma-tab"} onClick={() => setNormaSelecionada(norma.id)}>{norma.nome}</button>
             ))}
           </div>
 
           <div className="grid section-space">
-            <div className="col-8">
-              <h2 className="card-title">{normaAtual.nome}</h2>
-              <p className="card-subtitle">{normaAtual.titulo}</p>
-            </div>
-
-            <div className="col-4 align-end">
-              <button className="btn btn-secondary" onClick={limparRespostas}>
-                Limpar respostas
-              </button>
-            </div>
+            <div className="col-8"><h2 className="card-title">{normaAtual.nome}</h2><p className="card-subtitle">{normaAtual.titulo}</p></div>
+            <div className="col-4 align-end"><button className="btn btn-secondary" onClick={limparRespostasNormaAtual}>Limpar esta norma</button></div>
           </div>
 
           <div className="grid">
-            <div className="col-4">
-              <div className="metric-card total">
-                <div className="metric-label">Total aplicável</div>
-                <div className="metric-value">{resumo.total}</div>
-              </div>
-            </div>
-
-            {STATUS.map((status) => (
-              <div className="col-4" key={status}>
-                <div className="metric-card">
-                  <div className="metric-label">{status}</div>
-                  <div className="metric-value">{resumo.contagem[status]}</div>
-                </div>
-              </div>
-            ))}
+            <div className="col-4"><div className="metric-card total"><div className="metric-label">Total aplicável</div><div className="metric-value">{resumo.total}</div></div></div>
+            {STATUS.map((status) => (<div className="col-4" key={status}><div className="metric-card"><div className="metric-label">{status}</div><div className="metric-value">{resumo.contagem[status]}</div></div></div>))}
           </div>
 
           <div className="grid section-space">
-            <div className="col-6">
-              <button
-                className="btn btn-dark"
-                onClick={exportarExcelPremium}
-                disabled={gerandoRelatorio}
-              >
-                {gerandoRelatorio ? "Gerando relatório..." : "Exportar Excel Premium"}
-              </button>
-            </div>
-
-            <div className="col-6">
-              <button
-                className="btn btn-secondary"
-                onClick={exportarPDFPremium}
-                disabled={gerandoRelatorio}
-              >
-                {gerandoRelatorio ? "Gerando relatório..." : "Exportar PDF Premium"}
-              </button>
-            </div>
+            <div className="col-6"><button className="btn btn-dark" onClick={exportarExcelPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar Excel Completo"}</button></div>
+            <div className="col-6"><button className="btn btn-secondary" onClick={exportarPDFPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar PDF Completo"}</button></div>
           </div>
 
-          <div className="search-box">
-            <label>
-              Buscar no checklist
-              <input
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                placeholder="Buscar item, referência, critério, evidência ou risco..."
-              />
-            </label>
-          </div>
+          <div className="search-box"><label>Buscar no checklist<input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar item, referência, critério, evidência ou risco..." /></label></div>
         </section>
 
         <section>
-          {itensVisiveis.length === 0 && (
-            <div className="card">
-              Nenhum item aplicável encontrado para os parâmetros atuais.
-            </div>
-          )}
+          {itensVisiveis.length === 0 && <div className="card">Nenhum item aplicável encontrado para os parâmetros atuais.</div>}
 
           {itensVisiveis.map((item, index) => {
             const chave = item.id || item.ref || `${normaSelecionada}-${index}`;
@@ -1604,147 +1752,27 @@ export default function App() {
 
             return (
               <article key={chave} className="checklist-item">
-                <div className="checklist-head">
-                  <span className="item-ref">{item.ref || item.id}</span>
-                  <span className={`status-pill ${classeStatus(statusAtual)}`}>
-                    {statusAtual}
-                  </span>
-                </div>
-
-                <h3 className="item-title">
-                  {item.item || item.descricao || "Item de verificação"}
-                </h3>
-
-                {item.subparte && (
-                  <p className="item-text">
-                    <strong>Subparte:</strong> {item.subparte}
-                  </p>
-                )}
-
-                {item.descricao && item.item && (
-                  <p className="item-text">{item.descricao}</p>
-                )}
-
-                {item.criterio && (
-                  <p className="item-text">
-                    <strong>Critério:</strong> {item.criterio}
-                  </p>
-                )}
-
-                {item.evidencias && (
-                  <p className="item-text">
-                    <strong>Evidências esperadas:</strong> {item.evidencias}
-                  </p>
-                )}
-
-                {item.risco && (
-                  <p className="item-text">
-                    <strong>Risco:</strong> {item.risco}
-                  </p>
-                )}
+                <div className="checklist-head"><span className="item-ref">{item.ref || item.id}</span><span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span></div>
+                <h3 className="item-title">{item.item || item.descricao || "Item de verificação"}</h3>
+                {item.subparte && <p className="item-text"><strong>Subparte:</strong> {item.subparte}</p>}
+                {item.descricao && item.item && <p className="item-text">{item.descricao}</p>}
+                {item.criterio && <p className="item-text"><strong>Critério:</strong> {item.criterio}</p>}
+                {item.evidencias && <p className="item-text"><strong>Evidências esperadas:</strong> {item.evidencias}</p>}
+                {item.risco && <p className="item-text"><strong>Risco:</strong> {item.risco}</p>}
 
                 <div className="status-row">
                   {STATUS.map((status) => {
                     const ativo = statusAtual === status;
                     const classe = classeStatus(status);
-
-                    return (
-                      <button
-                        key={status}
-                        type="button"
-                        className={
-                          ativo
-                            ? `status-btn ${classe} active`
-                            : `status-btn ${classe}`
-                        }
-                        onClick={() => atualizarResposta(item, "status", status)}
-                      >
-                        {status}
-                      </button>
-                    );
+                    return <button key={status} type="button" className={ativo ? `status-btn ${classe} active` : `status-btn ${classe}`} onClick={() => atualizarResposta(item, "status", status)}>{status}</button>;
                   })}
                 </div>
 
                 <div className="grid field-grid">
-                  <div className="col-6">
-                    <label>
-                      Responsável
-                      <input
-                        value={resposta.responsavel || ""}
-                        onChange={(e) =>
-                          atualizarResposta(item, "responsavel", e.target.value)
-                        }
-                        placeholder="Responsável"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="col-6">
-                    <label>
-                      Prazo
-                      <select
-                        value={resposta.prazo || ""}
-                        onChange={(e) =>
-                          atualizarResposta(item, "prazo", e.target.value)
-                        }
-                      >
-                        <option value="">Não definido</option>
-                        <option>IMEDIATO</option>
-                        <option>CURTO PRAZO</option>
-                        <option>MÉDIO PRAZO</option>
-                        <option>LONGO PRAZO</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="col-12">
-                    <div className="evidencias-box">
-                      <strong>Evidências fotográficas</strong>
-                      <p>
-                        Adicione fotos tiradas na hora ou selecione imagens da
-                        galeria do celular.
-                      </p>
-
-                      <label className="upload-evidencia">
-                        Tirar foto ou anexar imagem
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={(e) => adicionarEvidencias(item, e.target.files)}
-                        />
-                      </label>
-
-                      {resposta.evidenciasAnexadas?.length > 0 && (
-                        <div className="preview-evidencias">
-                          {resposta.evidenciasAnexadas.map((ev, indexEv) => (
-                            <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
-                              <img src={ev.data} alt={ev.nome} />
-                              <button
-                                type="button"
-                                onClick={() => removerEvidencia(item, indexEv)}
-                              >
-                                Remover
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="col-12">
-                    <label>
-                      Observações de campo
-                      <textarea
-                        value={resposta.obs || ""}
-                        onChange={(e) =>
-                          atualizarResposta(item, "obs", e.target.value)
-                        }
-                        placeholder="Observações, evidências coletadas, pendências ou recomendações..."
-                      />
-                    </label>
-                  </div>
+                  <div className="col-6"><label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label></div>
+                  <div className="col-6"><label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label></div>
+                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><label className="upload-evidencia">Tirar foto ou anexar imagem<input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} /></label>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={ev.data} alt={ev.nome} /><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
+                  <div className="col-12"><label>Observações de campo<textarea value={resposta.obs || ""} onChange={(e) => atualizarResposta(item, "obs", e.target.value)} placeholder="Observações, evidências coletadas, pendências ou recomendações..." /></label></div>
                 </div>
               </article>
             );

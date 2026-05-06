@@ -778,3 +778,440 @@ button,
     font-size: 25px;
   }
 }
+
+/* ==========================
+   VELOX - LOGIN E INSPEÇÕES
+   ========================== */
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 16px;
+}
+
+.auth-card {
+  width: min(520px, 100%);
+  background: linear-gradient(145deg, rgba(255,255,255,0.14), rgba(255,255,255,0.055));
+  border: 1px solid rgba(57, 255, 136, 0.28);
+  border-radius: 28px;
+  padding: 30px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42), 0 0 34px rgba(32, 196, 90, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.auth-logo {
+  width: 220px;
+  max-width: 100%;
+  display: block;
+  margin-bottom: 20px;
+}
+
+.auth-card h1 {
+  margin: 0 0 10px;
+  font-size: 28px;
+  line-height: 1.15;
+  color: #ffffff;
+}
+
+.auth-card p {
+  margin: 0 0 18px;
+  color: var(--velox-muted);
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.auth-tabs button {
+  background: rgba(255,255,255,0.10);
+  color: #e8fff0;
+  border: 1px solid rgba(255,255,255,0.14);
+}
+
+.auth-tabs button.active {
+  background: linear-gradient(135deg, var(--velox-green), var(--velox-green-dark));
+  color: #ffffff;
+  border-color: rgba(57,255,136,0.45);
+}
+
+.auth-form {
+  display: grid;
+  gap: 13px;
+}
+
+.auth-alert {
+  margin-top: 16px;
+  padding: 13px 15px;
+  border-radius: 16px;
+  background: rgba(201, 163, 0, 0.14);
+  border: 1px solid rgba(201, 163, 0, 0.30);
+  color: #fff7c2;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #07120b;
+  font-weight: 900;
+  background: rgba(32, 196, 90, 0.10);
+  border: 1px solid rgba(32, 196, 90, 0.22);
+  border-radius: 999px;
+  padding: 8px 10px 8px 16px;
+}
+
+.user-chip span,
+.user-chip small {
+  display: block;
+}
+
+.user-chip small {
+  color: #34513d;
+  font-size: 11px;
+  margin-left: -4px;
+}
+
+.user-chip button {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #07120b;
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.action-card {
+  border-top: 5px solid var(--velox-green);
+}
+
+.actions-stack {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.34);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.24);
+  transform: translateY(-1px);
+}
+
+.inspections-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.empty-state {
+  border: 1px dashed rgba(57,255,136,0.30);
+  border-radius: 18px;
+  padding: 18px;
+  color: var(--velox-muted);
+  font-weight: 800;
+  background: rgba(255,255,255,0.05);
+}
+
+.inspection-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 20px;
+  background: rgba(255,255,255,0.065);
+}
+
+.inspection-row.active {
+  border-color: rgba(57,255,136,0.46);
+  box-shadow: 0 0 24px rgba(32,196,90,0.12);
+}
+
+.inspection-row strong,
+.inspection-row span,
+.inspection-row small {
+  display: block;
+}
+
+.inspection-row strong {
+  color: #ffffff;
+  font-size: 16px;
+  margin-bottom: 5px;
+}
+
+.inspection-row span,
+.inspection-row small {
+  color: var(--velox-muted);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.inspection-progress {
+  min-width: 92px;
+  text-align: center;
+  border-radius: 18px;
+  padding: 10px 12px;
+  background: rgba(57,255,136,0.10);
+  border: 1px solid rgba(57,255,136,0.22);
+}
+
+.inspection-progress b,
+.inspection-progress small {
+  display: block;
+}
+
+.inspection-progress b {
+  color: var(--velox-green-neon);
+  font-size: 22px;
+}
+
+.inspection-progress small {
+  color: #c8d8cc;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.inspection-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.inspection-actions .btn {
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.admin-users {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.admin-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.06);
+}
+
+.admin-user-row strong,
+.admin-user-row span {
+  display: block;
+}
+
+.admin-user-row strong {
+  color: #ffffff;
+}
+
+.admin-user-row span {
+  color: var(--velox-muted);
+  font-weight: 700;
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+@media (max-width: 900px) {
+  .user-chip {
+    width: 100%;
+    justify-content: space-between;
+    border-radius: 18px;
+  }
+
+  .actions-stack,
+  .inspection-actions {
+    justify-content: stretch;
+  }
+
+  .inspection-row {
+    grid-template-columns: 1fr;
+  }
+
+  .inspection-progress {
+    text-align: left;
+  }
+
+  .admin-user-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* PAINEL ADMINISTRATIVO COMPLETO */
+.admin-status-box {
+  border: 1px solid rgba(250, 204, 21, 0.36);
+  background: linear-gradient(145deg, rgba(250, 204, 21, 0.16), rgba(255,255,255,0.06));
+  border-radius: 20px;
+  padding: 16px;
+  text-align: center;
+}
+
+.admin-status-box strong {
+  display: block;
+  font-size: 34px;
+  color: var(--velox-yellow);
+  line-height: 1;
+}
+
+.admin-status-box span {
+  display: block;
+  color: #fff7cc;
+  font-weight: 900;
+  font-size: 12px;
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.admin-stats-grid div {
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.07);
+  border-radius: 18px;
+  padding: 14px 10px;
+  text-align: center;
+}
+
+.admin-stats-grid b {
+  display: block;
+  color: var(--velox-green-neon);
+  font-size: 25px;
+  margin-bottom: 4px;
+}
+
+.admin-stats-grid span {
+  display: block;
+  color: var(--velox-muted);
+  font-weight: 900;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) auto minmax(420px, auto);
+  align-items: center;
+}
+
+.admin-user-row.current {
+  border-color: rgba(57, 255, 136, 0.36);
+  box-shadow: 0 0 22px rgba(57, 255, 136, 0.08);
+}
+
+.admin-user-main small {
+  display: block;
+  color: #d7e9dc;
+  font-weight: 800;
+  margin-top: 5px;
+}
+
+.admin-user-status {
+  display: flex;
+  justify-content: center;
+}
+
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 900;
+  border: 1px solid rgba(255,255,255,0.16);
+}
+
+.admin-badge.active {
+  background: rgba(22, 163, 74, 0.22);
+  color: #c9ffda;
+  border-color: rgba(22, 163, 74, 0.42);
+}
+
+.admin-badge.pending {
+  background: rgba(250, 204, 21, 0.18);
+  color: #fff3b0;
+  border-color: rgba(250, 204, 21, 0.42);
+}
+
+.admin-badge.blocked {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ffd0d0;
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.admin-user-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.admin-user-actions .btn {
+  padding: 10px 12px;
+  font-size: 12px;
+  border-radius: 12px;
+}
+
+.admin-inspections-panel {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,0.14);
+}
+
+.admin-inspections-panel h3 {
+  color: #ffffff;
+  margin: 0 0 14px;
+}
+
+@media (max-width: 1100px) {
+  .admin-stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .admin-user-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-user-status,
+  .admin-user-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 620px) {
+  .admin-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .admin-user-actions .btn {
+    width: 100%;
+  }
+}
