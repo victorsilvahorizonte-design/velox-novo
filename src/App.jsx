@@ -34,6 +34,31 @@ const STORAGE_KEYS = {
   baseANAC: "baseANAC",
 };
 
+// ADMIN MASTER FIXO PARA AMBIENTE PUBLICADO
+// IMPORTANTE: cadastre o administrador usando exatamente este e-mail.
+// Depois, somente o Admin Master poderá tornar outros usuários administradores.
+const ADMIN_MASTER_EMAIL = "admin@veloxservice.com.br";
+
+function normalizarEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function senhaLimpa(senha) {
+  return String(senha || "").trim();
+}
+
+function ehAdmin(usuario) {
+  return usuario?.tipo === "admin" || usuario?.tipo === "adminMaster" || usuario?.adminMaster === true;
+}
+
+function ehAdminMaster(usuario) {
+  return (
+    usuario?.tipo === "adminMaster" ||
+    usuario?.adminMaster === true ||
+    normalizarEmail(usuario?.email) === ADMIN_MASTER_EMAIL
+  );
+}
+
 const CONFIG_INICIAL = {
   nomeAerodromo: "",
   municipio: "",
@@ -418,11 +443,27 @@ export default function App() {
 
   useEffect(() => {
     const usuariosSalvos = safeParse(localStorage.getItem(STORAGE_KEYS.usuarios), []);
-    const usuarioSessao = safeParse(localStorage.getItem(STORAGE_KEYS.usuarioLogado), null);
+    const usuarioSessao = safeParse(sessionStorage.getItem(STORAGE_KEYS.usuarioLogado), null);
     const inspecoesSalvas = safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []);
     const baseSalva = safeParse(localStorage.getItem(STORAGE_KEYS.baseANAC), []);
 
-    setUsuarios(Array.isArray(usuariosSalvos) ? usuariosSalvos : []);
+    setUsuarios(
+      Array.isArray(usuariosSalvos)
+        ? usuariosSalvos.map((usuario) => {
+            const emailUsuario = normalizarEmail(usuario.email);
+            const master = usuario.adminMaster === true || emailUsuario === ADMIN_MASTER_EMAIL;
+            return {
+              ...usuario,
+              email: emailUsuario,
+              senha: senhaLimpa(usuario.senha),
+              tipo: master ? "adminMaster" : usuario.tipo || "inspetor",
+              adminMaster: master,
+              ativo: master ? true : usuario.ativo === true,
+              statusCadastro: master ? "aprovado" : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
+            };
+          })
+        : []
+    );
     setInspecoes(Array.isArray(inspecoesSalvas) ? inspecoesSalvas : []);
     setBaseANAC(Array.isArray(baseSalva) ? baseSalva : []);
 
@@ -455,8 +496,9 @@ export default function App() {
 
   useEffect(() => {
     if (usuarioLogado) {
-      localStorage.setItem(STORAGE_KEYS.usuarioLogado, JSON.stringify(usuarioLogado));
+      sessionStorage.setItem(STORAGE_KEYS.usuarioLogado, JSON.stringify(usuarioLogado));
     } else {
+      sessionStorage.removeItem(STORAGE_KEYS.usuarioLogado);
       localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
     }
   }, [usuarioLogado]);
@@ -629,7 +671,7 @@ export default function App() {
     const pendentes = usuarios.filter((u) => u.ativo === false && u.statusCadastro !== "bloqueado").length;
     const bloqueados = usuarios.filter((u) => u.statusCadastro === "bloqueado").length;
     const ativos = usuarios.filter((u) => u.ativo !== false).length;
-    const admins = usuarios.filter((u) => u.tipo === "admin").length;
+    const admins = usuarios.filter((u) => ehAdmin(u)).length;
     const concluidas = inspecoes.filter((i) => i.statusGeral === "concluida").length;
 
     return {
@@ -920,9 +962,10 @@ export default function App() {
 
   function fazerCadastro(e) {
     e.preventDefault();
-    const email = authForm.email.trim().toLowerCase();
+    const email = normalizarEmail(authForm.email);
+    const senhaCadastro = senhaLimpa(authForm.senha);
 
-    if (!authForm.nomeCompleto.trim() || !email || !authForm.senha) {
+    if (!authForm.nomeCompleto.trim() || !email || !senhaCadastro) {
       alert("Preencha nome completo, e-mail e senha.");
       return;
     }
@@ -932,7 +975,7 @@ export default function App() {
       return;
     }
 
-    const primeiroUsuario = usuarios.length === 0;
+    const master = email === ADMIN_MASTER_EMAIL;
 
     const novoUsuario = {
       id: gerarId("USR"),
@@ -940,18 +983,19 @@ export default function App() {
       email,
       telefone: authForm.telefone.trim(),
       cpf: authForm.cpf.trim(),
-      senha: authForm.senha.trim(),
-      ativo: primeiroUsuario,
-      tipo: primeiroUsuario ? "admin" : "inspetor",
-      statusCadastro: primeiroUsuario ? "aprovado" : "pendente",
+      senha: senhaCadastro,
+      ativo: master,
+      tipo: master ? "adminMaster" : "inspetor",
+      adminMaster: master,
+      statusCadastro: master ? "aprovado" : "pendente",
       criadoEm: new Date().toISOString(),
-      aprovadoEm: primeiroUsuario ? new Date().toISOString() : "",
+      aprovadoEm: master ? new Date().toISOString() : "",
     };
 
     setUsuarios((prev) => [...prev, novoUsuario]);
     setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
 
-    if (primeiroUsuario) {
+    if (master) {
       setUsuarioLogado(novoUsuario);
     } else {
       alert("Cadastro enviado com sucesso. Aguarde aprovação do administrador Velox para acessar o sistema.");
@@ -961,8 +1005,8 @@ export default function App() {
 
   function fazerLogin(e) {
     e.preventDefault();
-    const email = authForm.email.trim().toLowerCase();
-    const senhaDigitada = authForm.senha.trim();
+    const email = normalizarEmail(authForm.email);
+    const senhaDigitada = senhaLimpa(authForm.senha);
     const usuario = usuarios.find(
       (u) => u.email === email && String(u.senha || "").trim() === senhaDigitada
     );
@@ -983,6 +1027,8 @@ export default function App() {
 
   function sair() {
     if (!window.confirm("Deseja sair do sistema?")) return;
+    sessionStorage.removeItem(STORAGE_KEYS.usuarioLogado);
+    localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
     setUsuarioLogado(null);
     setInspecaoAtualId(null);
     setConfigAerodromo(CONFIG_INICIAL);
@@ -992,6 +1038,7 @@ export default function App() {
   }
 
   function aprovarUsuario(usuarioId) {
+    if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
     setUsuarios((prev) =>
       prev.map((usuario) =>
@@ -1004,6 +1051,7 @@ export default function App() {
   }
 
   function bloquearUsuario(usuarioId) {
+    if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario || usuario.id === usuarioLogado.id) return;
     if (!window.confirm(`Deseja bloquear o acesso de ${usuario.nomeCompleto}?`)) return;
@@ -1018,6 +1066,7 @@ export default function App() {
   }
 
   function desbloquearUsuario(usuarioId) {
+    if (!ehAdmin(usuarioLogado)) return;
     setUsuarios((prev) =>
       prev.map((usuario) =>
         usuario.id === usuarioId
@@ -1028,6 +1077,7 @@ export default function App() {
   }
 
   function excluirUsuario(usuarioId) {
+    if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario || usuario.id === usuarioLogado.id) return;
     if (!window.confirm(`Excluir o usuário ${usuario.nomeCompleto} e todas as inspeções vinculadas a ele?`)) return;
@@ -1038,6 +1088,7 @@ export default function App() {
   }
 
   function resetarSenhaUsuario(usuarioId) {
+    if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario) return;
     const novaSenha = window.prompt(`Digite a nova senha para ${usuario.nomeCompleto}:`);
@@ -1055,9 +1106,14 @@ export default function App() {
   }
 
   function alternarTipoAdmin(usuarioId) {
+    if (!ehAdminMaster(usuarioLogado)) {
+      alert("Somente o Admin Master pode tornar outro usuário administrador.");
+      return;
+    }
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario || usuario.id === usuarioLogado.id) return;
-    const novoTipo = usuario.tipo === "admin" ? "inspetor" : "admin";
+    const usuarioEhAdmin = ehAdmin(usuario);
+    const novoTipo = usuarioEhAdmin ? "inspetor" : "admin";
     if (!window.confirm(`Deseja transformar ${usuario.nomeCompleto} em ${novoTipo === "admin" ? "administrador" : "inspetor"}?`)) return;
 
     setUsuarios((prev) =>
@@ -1482,7 +1538,7 @@ export default function App() {
           </form>
 
           {usuarios.length === 0 && (
-            <div className="auth-alert">O primeiro usuário cadastrado será o administrador local do sistema.</div>
+            <div className="auth-alert">Cadastros novos entram como pendentes. O Admin Master aprova o acesso no painel de gestão.</div>
           )}
         </section>
       </div>
@@ -1501,7 +1557,7 @@ export default function App() {
         </div>
         <div className="user-chip">
           <span>{usuarioLogado.nomeCompleto}</span>
-          <small>{usuarioLogado.tipo === "admin" ? "Administrador" : "Inspetor"}</small>
+          <small>{ehAdminMaster(usuarioLogado) ? "Admin Master" : ehAdmin(usuarioLogado) ? "Administrador" : "Inspetor"}</small>
           <button type="button" onClick={sair}>Sair</button>
         </div>
       </header>
@@ -1577,7 +1633,7 @@ export default function App() {
           )}
         </section>
 
-        {usuarioLogado.tipo === "admin" && usuarios.length > 0 && (
+        {ehAdmin(usuarioLogado) && usuarios.length > 0 && (
           <section className="card admin-card">
             <div className="grid">
               <div className="col-8">
@@ -1613,7 +1669,7 @@ export default function App() {
                     <div className="admin-user-main">
                       <strong>{usuario.nomeCompleto}</strong>
                       <span>{usuario.email} • {usuario.telefone || "sem telefone"} • CPF {usuario.cpf || "não informado"}</span>
-                      <small>Perfil: {usuario.tipo === "admin" ? "Administrador" : "Inspetor"} • Inspeções: {totalDoUsuario}</small>
+                      <small>Perfil: {ehAdminMaster(usuario) ? "Admin Master" : ehAdmin(usuario) ? "Administrador" : "Inspetor"} • Inspeções: {totalDoUsuario}</small>
                     </div>
 
                     <div className="admin-user-status">
@@ -1632,8 +1688,8 @@ export default function App() {
                         <button className="btn btn-danger" onClick={() => bloquearUsuario(usuario.id)} disabled={usuario.id === usuarioLogado.id}>Bloquear</button>
                       )}
                       <button className="btn btn-secondary" onClick={() => resetarSenhaUsuario(usuario.id)}>Resetar senha</button>
-                      <button className="btn btn-secondary" onClick={() => alternarTipoAdmin(usuario.id)} disabled={usuario.id === usuarioLogado.id}>
-                        {usuario.tipo === "admin" ? "Tornar inspetor" : "Tornar admin"}
+                      <button className="btn btn-secondary" onClick={() => alternarTipoAdmin(usuario.id)} disabled={usuario.id === usuarioLogado.id || !ehAdminMaster(usuarioLogado)}>
+                        {ehAdmin(usuario) ? "Tornar inspetor" : "Tornar admin"}
                       </button>
                       <button className="btn btn-secondary" onClick={() => setAdminUsuarioSelecionado(adminUsuarioSelecionado === usuario.id ? "" : usuario.id)}>
                         Ver inspeções
