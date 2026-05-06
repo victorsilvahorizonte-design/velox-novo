@@ -940,7 +940,7 @@ export default function App() {
       email,
       telefone: authForm.telefone.trim(),
       cpf: authForm.cpf.trim(),
-      senha: authForm.senha,
+      senha: authForm.senha.trim(),
       ativo: primeiroUsuario,
       tipo: primeiroUsuario ? "admin" : "inspetor",
       statusCadastro: primeiroUsuario ? "aprovado" : "pendente",
@@ -962,7 +962,10 @@ export default function App() {
   function fazerLogin(e) {
     e.preventDefault();
     const email = authForm.email.trim().toLowerCase();
-    const usuario = usuarios.find((u) => u.email === email && u.senha === authForm.senha);
+    const senhaDigitada = authForm.senha.trim();
+    const usuario = usuarios.find(
+      (u) => u.email === email && String(u.senha || "").trim() === senhaDigitada
+    );
 
     if (!usuario) {
       alert("E-mail ou senha inválidos.");
@@ -989,6 +992,7 @@ export default function App() {
   }
 
   function aprovarUsuario(usuarioId) {
+    const usuario = usuarios.find((u) => u.id === usuarioId);
     setUsuarios((prev) =>
       prev.map((usuario) =>
         usuario.id === usuarioId
@@ -996,6 +1000,7 @@ export default function App() {
           : usuario
       )
     );
+    if (usuario) alert(`Usuário ${usuario.nomeCompleto} aprovado. Ele deve entrar com o mesmo e-mail e senha cadastrados.`);
   }
 
   function bloquearUsuario(usuarioId) {
@@ -1036,14 +1041,15 @@ export default function App() {
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario) return;
     const novaSenha = window.prompt(`Digite a nova senha para ${usuario.nomeCompleto}:`);
-    if (!novaSenha) return;
-    if (novaSenha.length < 4) {
+    const senhaLimpa = String(novaSenha || "").trim();
+    if (!senhaLimpa) return;
+    if (senhaLimpa.length < 4) {
       alert("A nova senha deve ter pelo menos 4 caracteres.");
       return;
     }
 
     setUsuarios((prev) =>
-      prev.map((u) => (u.id === usuarioId ? { ...u, senha: novaSenha, senhaAlteradaEm: new Date().toISOString() } : u))
+      prev.map((u) => (u.id === usuarioId ? { ...u, senha: senhaLimpa, senhaAlteradaEm: new Date().toISOString() } : u))
     );
     alert("Senha alterada com sucesso.");
   }
