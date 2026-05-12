@@ -844,31 +844,6 @@ button,
   gap: 13px;
 }
 
-.mostrar-senha-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  width: fit-content;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(57, 255, 136, 0.20);
-  cursor: pointer;
-  color: #e8fff0;
-}
-
-.mostrar-senha-check input {
-  width: 17px;
-  height: 17px;
-  accent-color: var(--velox-green);
-}
-
-.mostrar-senha-check span {
-  font-size: 13px;
-  font-weight: 900;
-}
-
 .auth-alert {
   margin-top: 16px;
   padding: 13px 15px;

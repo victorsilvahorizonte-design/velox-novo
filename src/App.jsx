@@ -36,14 +36,15 @@ const STORAGE_KEYS = {
 
 // ADMIN MASTER FIXO PARA AMBIENTE PUBLICADO
 // IMPORTANTE:
-// 1) Este usuário é criado automaticamente como Admin Master em qualquer navegador novo.
-// 2) Cadastros feitos pelo link público NUNCA viram Admin Master.
-// 3) Troque a senha inicial abaixo antes de publicar em produção.
-const ADMIN_MASTER_EMAIL = "admin@veloxservice.com.br";
-const ADMIN_MASTER_NOME = "Administrador Master Velox";
-const ADMIN_MASTER_SENHA_INICIAL = "Velox@2026";
-const ADMIN_MASTER_TELEFONE = "";
-const ADMIN_MASTER_CPF = "";
+// 1) O Admin Master oficial agora é comercial@veloxservice.com.br.
+// 2) O antigo admin@veloxservice.com.br será removido/migrado automaticamente.
+// 3) Cadastros feitos pelo link público NUNCA viram Admin Master.
+const ADMIN_MASTER_EMAIL = "comercial@veloxservice.com.br";
+const ADMIN_MASTER_NOME = "Velox Service";
+const ADMIN_MASTER_SENHA_INICIAL = "123456";
+const ADMIN_MASTER_TELEFONE = "62999136262";
+const ADMIN_MASTER_CPF = "94601887100";
+const ADMIN_MASTER_EMAILS_ANTIGOS = ["admin@veloxservice.com.br"];
 
 function normalizarEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -51,6 +52,14 @@ function normalizarEmail(email) {
 
 function senhaLimpa(senha) {
   return String(senha || "").trim();
+}
+
+function ehEmailAdminMasterOficial(email) {
+  return normalizarEmail(email) === ADMIN_MASTER_EMAIL;
+}
+
+function ehEmailAdminMasterAntigo(email) {
+  return ADMIN_MASTER_EMAILS_ANTIGOS.includes(normalizarEmail(email));
 }
 
 function ehAdmin(usuario) {
@@ -468,33 +477,54 @@ export default function App() {
     const baseSalva = safeParse(localStorage.getItem(STORAGE_KEYS.baseANAC), []);
 
     const usuariosNormalizados = Array.isArray(usuariosSalvos)
-      ? usuariosSalvos.map((usuario) => {
-          const emailUsuario = normalizarEmail(usuario.email);
-          const master =
-            usuario.adminMaster === true ||
-            usuario.tipo === "adminMaster" ||
-            emailUsuario === ADMIN_MASTER_EMAIL;
+      ? usuariosSalvos
+          // remove o admin master antigo para não travar o novo cadastro oficial
+          .filter((usuario) => !ehEmailAdminMasterAntigo(usuario.email))
+          .map((usuario) => {
+            const emailUsuario = normalizarEmail(usuario.email);
+            const master = ehEmailAdminMasterOficial(emailUsuario);
+            const tipoSeguro = usuario.tipo === "admin" ? "admin" : "inspetor";
 
-          return {
-            ...usuario,
-            email: emailUsuario,
-            senha: senhaLimpa(usuario.senha),
-            tipo: master ? "adminMaster" : usuario.tipo || "inspetor",
-            adminMaster: master,
-            ativo: master ? true : usuario.ativo === true,
-            statusCadastro: master
-              ? "aprovado"
-              : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
-          };
-        })
+            return {
+              ...usuario,
+              email: emailUsuario,
+              senha: senhaLimpa(usuario.senha),
+              tipo: master ? "adminMaster" : tipoSeguro,
+              adminMaster: master,
+              ativo: master ? true : usuario.ativo === true,
+              statusCadastro: master
+                ? "aprovado"
+                : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
+            };
+          })
       : [];
 
-    const existeAdminMaster = usuariosNormalizados.some((usuario) => ehAdminMaster(usuario));
-    const usuariosComAdminMaster = existeAdminMaster
-      ? usuariosNormalizados
+    const existeAdminMasterOficial = usuariosNormalizados.some((usuario) =>
+      ehEmailAdminMasterOficial(usuario.email)
+    );
+
+    const usuariosComAdminMaster = existeAdminMasterOficial
+      ? usuariosNormalizados.map((usuario) =>
+          ehEmailAdminMasterOficial(usuario.email)
+            ? {
+                ...usuario,
+                id: usuario.id || "USR-ADMIN-MASTER-VELOX",
+                nomeCompleto: usuario.nomeCompleto || ADMIN_MASTER_NOME,
+                telefone: usuario.telefone || ADMIN_MASTER_TELEFONE,
+                cpf: usuario.cpf || ADMIN_MASTER_CPF,
+                senha: senhaLimpa(usuario.senha) || ADMIN_MASTER_SENHA_INICIAL,
+                ativo: true,
+                tipo: "adminMaster",
+                adminMaster: true,
+                statusCadastro: "aprovado",
+                aprovadoEm: usuario.aprovadoEm || new Date().toISOString(),
+              }
+            : usuario
+        )
       : [criarAdminMasterInicial(), ...usuariosNormalizados];
 
     setUsuarios(usuariosComAdminMaster);
+    localStorage.setItem(STORAGE_KEYS.usuarios, JSON.stringify(usuariosComAdminMaster));
     setInspecoes(Array.isArray(inspecoesSalvas) ? inspecoesSalvas : []);
     setBaseANAC(Array.isArray(baseSalva) ? baseSalva : []);
 
@@ -1015,7 +1045,7 @@ export default function App() {
     }
 
     if (email === ADMIN_MASTER_EMAIL) {
-      alert("Este e-mail é reservado ao Admin Master. Use a opção Entrar ou solicite suporte ao administrador.");
+      alert("Este e-mail já é o Admin Master oficial. Clique em Entrar e use a senha inicial 123456.");
       setModoAuth("login");
       return;
     }
