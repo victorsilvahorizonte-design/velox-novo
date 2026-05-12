@@ -35,9 +35,15 @@ const STORAGE_KEYS = {
 };
 
 // ADMIN MASTER FIXO PARA AMBIENTE PUBLICADO
-// IMPORTANTE: cadastre o administrador usando exatamente este e-mail.
-// Depois, somente o Admin Master poderá tornar outros usuários administradores.
+// IMPORTANTE:
+// 1) Este usuário é criado automaticamente como Admin Master em qualquer navegador novo.
+// 2) Cadastros feitos pelo link público NUNCA viram Admin Master.
+// 3) Troque a senha inicial abaixo antes de publicar em produção.
 const ADMIN_MASTER_EMAIL = "admin@veloxservice.com.br";
+const ADMIN_MASTER_NOME = "Administrador Master Velox";
+const ADMIN_MASTER_SENHA_INICIAL = "Velox@2026";
+const ADMIN_MASTER_TELEFONE = "";
+const ADMIN_MASTER_CPF = "";
 
 function normalizarEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -52,11 +58,7 @@ function ehAdmin(usuario) {
 }
 
 function ehAdminMaster(usuario) {
-  return (
-    usuario?.tipo === "adminMaster" ||
-    usuario?.adminMaster === true ||
-    normalizarEmail(usuario?.email) === ADMIN_MASTER_EMAIL
-  );
+  return usuario?.tipo === "adminMaster" || usuario?.adminMaster === true;
 }
 
 const CONFIG_INICIAL = {
@@ -115,6 +117,23 @@ function safeParse(valor, fallback) {
 function gerarId(prefixo = "VEL") {
   const random = Math.random().toString(36).slice(2, 9).toUpperCase();
   return `${prefixo}-${Date.now()}-${random}`;
+}
+
+function criarAdminMasterInicial() {
+  return {
+    id: "USR-ADMIN-MASTER-VELOX",
+    nomeCompleto: ADMIN_MASTER_NOME,
+    email: ADMIN_MASTER_EMAIL,
+    telefone: ADMIN_MASTER_TELEFONE,
+    cpf: ADMIN_MASTER_CPF,
+    senha: ADMIN_MASTER_SENHA_INICIAL,
+    ativo: true,
+    tipo: "adminMaster",
+    adminMaster: true,
+    statusCadastro: "aprovado",
+    criadoEm: new Date().toISOString(),
+    aprovadoEm: new Date().toISOString(),
+  };
 }
 
 function dataBR(valor) {
@@ -436,6 +455,7 @@ export default function App() {
     cpf: "",
     senha: "",
   });
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarMinhasInspecoes, setMostrarMinhasInspecoes] = useState(true);
   const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
 
@@ -447,23 +467,34 @@ export default function App() {
     const inspecoesSalvas = safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []);
     const baseSalva = safeParse(localStorage.getItem(STORAGE_KEYS.baseANAC), []);
 
-    setUsuarios(
-      Array.isArray(usuariosSalvos)
-        ? usuariosSalvos.map((usuario) => {
-            const emailUsuario = normalizarEmail(usuario.email);
-            const master = usuario.adminMaster === true || emailUsuario === ADMIN_MASTER_EMAIL;
-            return {
-              ...usuario,
-              email: emailUsuario,
-              senha: senhaLimpa(usuario.senha),
-              tipo: master ? "adminMaster" : usuario.tipo || "inspetor",
-              adminMaster: master,
-              ativo: master ? true : usuario.ativo === true,
-              statusCadastro: master ? "aprovado" : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
-            };
-          })
-        : []
-    );
+    const usuariosNormalizados = Array.isArray(usuariosSalvos)
+      ? usuariosSalvos.map((usuario) => {
+          const emailUsuario = normalizarEmail(usuario.email);
+          const master =
+            usuario.adminMaster === true ||
+            usuario.tipo === "adminMaster" ||
+            emailUsuario === ADMIN_MASTER_EMAIL;
+
+          return {
+            ...usuario,
+            email: emailUsuario,
+            senha: senhaLimpa(usuario.senha),
+            tipo: master ? "adminMaster" : usuario.tipo || "inspetor",
+            adminMaster: master,
+            ativo: master ? true : usuario.ativo === true,
+            statusCadastro: master
+              ? "aprovado"
+              : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
+          };
+        })
+      : [];
+
+    const existeAdminMaster = usuariosNormalizados.some((usuario) => ehAdminMaster(usuario));
+    const usuariosComAdminMaster = existeAdminMaster
+      ? usuariosNormalizados
+      : [criarAdminMasterInicial(), ...usuariosNormalizados];
+
+    setUsuarios(usuariosComAdminMaster);
     setInspecoes(Array.isArray(inspecoesSalvas) ? inspecoesSalvas : []);
     setBaseANAC(Array.isArray(baseSalva) ? baseSalva : []);
 
@@ -964,43 +995,58 @@ export default function App() {
     e.preventDefault();
     const email = normalizarEmail(authForm.email);
     const senhaCadastro = senhaLimpa(authForm.senha);
+    const nomeCompleto = String(authForm.nomeCompleto || "").trim();
+    const telefone = String(authForm.telefone || "").trim();
+    const cpf = String(authForm.cpf || "").trim();
 
-    if (!authForm.nomeCompleto.trim() || !email || !senhaCadastro) {
+    if (!nomeCompleto || !email || !senhaCadastro) {
       alert("Preencha nome completo, e-mail e senha.");
       return;
     }
 
-    if (usuarios.some((u) => u.email === email)) {
-      alert("Já existe usuário cadastrado com este e-mail.");
+    if (!telefone || !cpf) {
+      alert("Preencha telefone e CPF para solicitar acesso.");
       return;
     }
 
-    const master = email === ADMIN_MASTER_EMAIL;
+    if (senhaCadastro.length < 4) {
+      alert("A senha deve ter pelo menos 4 caracteres.");
+      return;
+    }
+
+    if (email === ADMIN_MASTER_EMAIL) {
+      alert("Este e-mail é reservado ao Admin Master. Use a opção Entrar ou solicite suporte ao administrador.");
+      setModoAuth("login");
+      return;
+    }
+
+    const emailJaExiste = usuarios.some((u) => normalizarEmail(u.email) === email);
+
+    if (emailJaExiste) {
+      alert("Este e-mail já está cadastrado. Faça login ou use outro e-mail.");
+      return;
+    }
 
     const novoUsuario = {
       id: gerarId("USR"),
-      nomeCompleto: authForm.nomeCompleto.trim(),
+      nomeCompleto,
       email,
-      telefone: authForm.telefone.trim(),
-      cpf: authForm.cpf.trim(),
+      telefone,
+      cpf,
       senha: senhaCadastro,
-      ativo: master,
-      tipo: master ? "adminMaster" : "inspetor",
-      adminMaster: master,
-      statusCadastro: master ? "aprovado" : "pendente",
+      ativo: false,
+      tipo: "inspetor",
+      adminMaster: false,
+      statusCadastro: "pendente",
       criadoEm: new Date().toISOString(),
-      aprovadoEm: master ? new Date().toISOString() : "",
+      aprovadoEm: "",
     };
 
     setUsuarios((prev) => [...prev, novoUsuario]);
     setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
-
-    if (master) {
-      setUsuarioLogado(novoUsuario);
-    } else {
-      alert("Cadastro enviado com sucesso. Aguarde aprovação do administrador Velox para acessar o sistema.");
-      setModoAuth("login");
-    }
+    setMostrarSenha(false);
+    alert("Cadastro enviado com sucesso. Aguarde aprovação do administrador Velox para acessar o sistema.");
+    setModoAuth("login");
   }
 
   function fazerLogin(e) {
@@ -1008,7 +1054,7 @@ export default function App() {
     const email = normalizarEmail(authForm.email);
     const senhaDigitada = senhaLimpa(authForm.senha);
     const usuario = usuarios.find(
-      (u) => u.email === email && String(u.senha || "").trim() === senhaDigitada
+      (u) => normalizarEmail(u.email) === email && senhaLimpa(u.senha) === senhaDigitada
     );
 
     if (!usuario) {
@@ -1023,6 +1069,7 @@ export default function App() {
 
     setUsuarioLogado(usuario);
     setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
+    setMostrarSenha(false);
   }
 
   function sair() {
@@ -1533,13 +1580,28 @@ export default function App() {
               </>
             )}
             <label>E-mail<input type="email" value={authForm.email} onChange={(e) => setAuthForm((p) => ({ ...p, email: e.target.value }))} /></label>
-            <label>Senha<input type="password" value={authForm.senha} onChange={(e) => setAuthForm((p) => ({ ...p, senha: e.target.value }))} /></label>
+            <label>
+              Senha
+              <input
+                type={mostrarSenha ? "text" : "password"}
+                value={authForm.senha}
+                onChange={(e) => setAuthForm((p) => ({ ...p, senha: e.target.value }))}
+              />
+            </label>
+            <label className="mostrar-senha-check">
+              <input
+                type="checkbox"
+                checked={mostrarSenha}
+                onChange={(e) => setMostrarSenha(e.target.checked)}
+              />
+              <span>Mostrar senha digitada</span>
+            </label>
             <button className="btn btn-dark" type="submit">{modoAuth === "login" ? "Entrar no sistema" : "Criar acesso"}</button>
           </form>
 
-          {usuarios.length === 0 && (
-            <div className="auth-alert">Cadastros novos entram como pendentes. O Admin Master aprova o acesso no painel de gestão.</div>
-          )}
+          <div className="auth-alert">
+            Cadastros novos entram como pendentes. O Admin Master aprova o acesso no painel de gestão.
+          </div>
         </section>
       </div>
     );
