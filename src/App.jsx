@@ -18,6 +18,22 @@ import {
 
 import { buscarAerodromoConsolidado } from "./data/aerodromosConsolidados";
 
+import {
+  atualizarUsuarioFirebase,
+  cadastrarUsuarioFirebase,
+  entrarUsuarioFirebase,
+  enviarResetSenhaFirebase,
+  excluirInspecaoFirebase,
+  excluirInspecoesDoUsuarioFirebase,
+  excluirUsuarioFirebase,
+  mensagemErroFirebase,
+  observarInspecoesFirebase,
+  observarSessaoFirebase,
+  observarUsuariosFirebase,
+  sairFirebase,
+  salvarInspecaoFirebase,
+} from "./services/firebaseService";
+
 const STATUS = [
   "NÃO VERIFICADO",
   "CONFORME",
@@ -471,66 +487,66 @@ export default function App() {
   const respostas = respostasPorNorma[normaSelecionada] || {};
 
   useEffect(() => {
-    const usuariosSalvos = safeParse(localStorage.getItem(STORAGE_KEYS.usuarios), []);
-    const usuarioSessao = safeParse(sessionStorage.getItem(STORAGE_KEYS.usuarioLogado), null);
-    const inspecoesSalvas = safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []);
     const baseSalva = safeParse(localStorage.getItem(STORAGE_KEYS.baseANAC), []);
-
-    const usuariosNormalizados = Array.isArray(usuariosSalvos)
-      ? usuariosSalvos
-          // remove o admin master antigo para não travar o novo cadastro oficial
-          .filter((usuario) => !ehEmailAdminMasterAntigo(usuario.email))
-          .map((usuario) => {
-            const emailUsuario = normalizarEmail(usuario.email);
-            const master = ehEmailAdminMasterOficial(emailUsuario);
-            const tipoSeguro = usuario.tipo === "admin" ? "admin" : "inspetor";
-
-            return {
-              ...usuario,
-              email: emailUsuario,
-              senha: senhaLimpa(usuario.senha),
-              tipo: master ? "adminMaster" : tipoSeguro,
-              adminMaster: master,
-              ativo: master ? true : usuario.ativo === true,
-              statusCadastro: master
-                ? "aprovado"
-                : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
-            };
-          })
-      : [];
-
-    const existeAdminMasterOficial = usuariosNormalizados.some((usuario) =>
-      ehEmailAdminMasterOficial(usuario.email)
-    );
-
-    const usuariosComAdminMaster = existeAdminMasterOficial
-      ? usuariosNormalizados.map((usuario) =>
-          ehEmailAdminMasterOficial(usuario.email)
-            ? {
-                ...usuario,
-                id: usuario.id || "USR-ADMIN-MASTER-VELOX",
-                nomeCompleto: usuario.nomeCompleto || ADMIN_MASTER_NOME,
-                telefone: usuario.telefone || ADMIN_MASTER_TELEFONE,
-                cpf: usuario.cpf || ADMIN_MASTER_CPF,
-                senha: senhaLimpa(usuario.senha) || ADMIN_MASTER_SENHA_INICIAL,
-                ativo: true,
-                tipo: "adminMaster",
-                adminMaster: true,
-                statusCadastro: "aprovado",
-                aprovadoEm: usuario.aprovadoEm || new Date().toISOString(),
-              }
-            : usuario
-        )
-      : [criarAdminMasterInicial(), ...usuariosNormalizados];
-
-    setUsuarios(usuariosComAdminMaster);
-    localStorage.setItem(STORAGE_KEYS.usuarios, JSON.stringify(usuariosComAdminMaster));
-    setInspecoes(Array.isArray(inspecoesSalvas) ? inspecoesSalvas : []);
     setBaseANAC(Array.isArray(baseSalva) ? baseSalva : []);
 
-    if (usuarioSessao?.id && usuarioSessao?.ativo !== false) {
-      setUsuarioLogado(usuarioSessao);
-    }
+    const cancelarSessao = observarSessaoFirebase((perfil) => {
+      if (!perfil) {
+        setUsuarioLogado(null);
+        sessionStorage.removeItem(STORAGE_KEYS.usuarioLogado);
+        localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
+        return;
+      }
+
+      const emailPerfil = normalizarEmail(perfil.email);
+      const master = ehEmailAdminMasterOficial(emailPerfil) || perfil.adminMaster === true || perfil.tipo === "adminMaster";
+
+      const usuarioSeguro = {
+        ...perfil,
+        id: perfil.id || perfil.uid,
+        email: emailPerfil,
+        tipo: master ? "adminMaster" : perfil.tipo || "inspetor",
+        adminMaster: master,
+        ativo: master ? true : perfil.ativo === true,
+        statusCadastro: master ? "aprovado" : perfil.statusCadastro || (perfil.ativo ? "aprovado" : "pendente"),
+      };
+
+      if (usuarioSeguro.ativo === false) {
+        setUsuarioLogado(null);
+        return;
+      }
+
+      setUsuarioLogado(usuarioSeguro);
+      sessionStorage.setItem(STORAGE_KEYS.usuarioLogado, JSON.stringify(usuarioSeguro));
+    });
+
+    const cancelarUsuarios = observarUsuariosFirebase((listaUsuarios) => {
+      const normalizados = Array.isArray(listaUsuarios)
+        ? listaUsuarios
+            .filter((usuario) => !ehEmailAdminMasterAntigo(usuario.email))
+            .map((usuario) => {
+              const emailUsuario = normalizarEmail(usuario.email);
+              const master = ehEmailAdminMasterOficial(emailUsuario) || usuario.adminMaster === true || usuario.tipo === "adminMaster";
+              return {
+                ...usuario,
+                id: usuario.id || usuario.uid,
+                email: emailUsuario,
+                tipo: master ? "adminMaster" : usuario.tipo || "inspetor",
+                adminMaster: master,
+                ativo: master ? true : usuario.ativo === true,
+                statusCadastro: master ? "aprovado" : usuario.statusCadastro || (usuario.ativo ? "aprovado" : "pendente"),
+              };
+            })
+        : [];
+
+      setUsuarios(normalizados);
+      localStorage.setItem(STORAGE_KEYS.usuarios, JSON.stringify(normalizados));
+    });
+
+    const cancelarInspecoes = observarInspecoesFirebase((listaInspecoes) => {
+      setInspecoes(Array.isArray(listaInspecoes) ? listaInspecoes : []);
+      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(listaInspecoes || []));
+    });
 
     const respostasAntigas = safeParse(localStorage.getItem("respostas-inspecao"), null);
     const configAntiga = safeParse(localStorage.getItem("config-aerodromo"), null);
@@ -542,9 +558,15 @@ export default function App() {
         RBAC153: respostasAntigas || {},
       }));
       setMensagemBase(
-        "Dados antigos encontrados e carregados como inspeção temporária. Clique em 'Salvar inspeção' para gravar no novo modelo por aeródromo."
+        "Dados antigos encontrados e carregados como inspeção temporária. Clique em 'Salvar inspeção' para gravar no novo modelo online por aeródromo."
       );
     }
+
+    return () => {
+      cancelarSessao?.();
+      cancelarUsuarios?.();
+      cancelarInspecoes?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -871,6 +893,67 @@ export default function App() {
     setNormaSelecionada("RBAC153");
   }
 
+  function itemEntraNoRelatorio(status) {
+    return status === "CONFORME" || status === "NÃO CONFORME";
+  }
+
+  function itensInspecionadosParaRelatorio(normaId) {
+    const respostasNorma = respostasPorNorma[normaId] || {};
+
+    return itensAplicaveisDaNorma(normaId).filter((item) => {
+      const chave = item.id || item.ref;
+      const status = respostasNorma[chave]?.status || "NÃO VERIFICADO";
+      return itemEntraNoRelatorio(status);
+    });
+  }
+
+  function calcularResumoRelatorio() {
+    const resumoRelatorio = {
+      total: 0,
+      conforme: 0,
+      naoConforme: 0,
+      evidencias: 0,
+      porNorma: {},
+    };
+
+    NORMAS_IDS.forEach((normaId) => {
+      const respostasNorma = respostasPorNorma[normaId] || {};
+      const itens = itensInspecionadosParaRelatorio(normaId);
+
+      const dadosNorma = {
+        total: itens.length,
+        conforme: 0,
+        naoConforme: 0,
+        evidencias: 0,
+      };
+
+      itens.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = respostasNorma[chave] || {};
+        const status = resposta.status || "NÃO VERIFICADO";
+
+        if (status === "CONFORME") {
+          dadosNorma.conforme += 1;
+          resumoRelatorio.conforme += 1;
+        }
+
+        if (status === "NÃO CONFORME") {
+          dadosNorma.naoConforme += 1;
+          resumoRelatorio.naoConforme += 1;
+        }
+
+        const totalEvidencias = (resposta.evidenciasAnexadas || []).length;
+        dadosNorma.evidencias += totalEvidencias;
+        resumoRelatorio.evidencias += totalEvidencias;
+      });
+
+      resumoRelatorio.total += dadosNorma.total;
+      resumoRelatorio.porNorma[normaId] = dadosNorma;
+    });
+
+    return resumoRelatorio;
+  }
+
   function montarEvidencias(todasNormas = true) {
     const lista = [];
     const normasParaLer = todasNormas ? NORMAS_IDS : [normaSelecionada];
@@ -878,11 +961,12 @@ export default function App() {
     normasParaLer.forEach((normaId) => {
       const norma = NORMAS[normaId] || { itens: [] };
       const respostasNorma = respostasPorNorma[normaId] || {};
-      const itens = (norma.itens || []).filter((item) => verificarAplicabilidade(item, configAerodromo));
+      const itens = itensInspecionadosParaRelatorio(normaId);
 
       itens.forEach((item) => {
         const chave = item.id || item.ref;
         const resposta = respostasNorma[chave] || {};
+        const status = resposta.status || "NÃO VERIFICADO";
         const imagens = resposta.evidenciasAnexadas || [];
 
         imagens.forEach((imagem) => {
@@ -894,7 +978,7 @@ export default function App() {
             itemTitulo: item.item || item.descricao || "Item de inspeção",
             requisito: item.criterio || "",
             observacao: resposta.obs || "",
-            status: resposta.status || "NÃO VERIFICADO",
+            status,
             imagem,
           });
         });
@@ -954,8 +1038,13 @@ export default function App() {
       return [objeto, ...prev];
     });
 
+    salvarInspecaoFirebase(objeto).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao salvar inspeção online: ${mensagemErroFirebase(erro)}`);
+    });
+
     setInspecaoAtualId(objeto.id);
-    setMensagemBase(`Inspeção salva: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
+    setMensagemBase(`Inspeção salva online: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
     return objeto;
   }
 
@@ -1006,22 +1095,35 @@ export default function App() {
       },
     };
     setInspecoes((prev) => [copia, ...prev]);
+    salvarInspecaoFirebase(copia).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao duplicar inspeção online: ${mensagemErroFirebase(erro)}`);
+    });
     setMensagemBase("Inspeção duplicada com sucesso.");
   }
 
   function excluirInspecao(id) {
     if (!window.confirm("Deseja excluir esta inspeção salva? Esta ação não poderá ser desfeita.")) return;
     setInspecoes((prev) => prev.filter((insp) => insp.id !== id));
+    excluirInspecaoFirebase(id).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao excluir inspeção online: ${mensagemErroFirebase(erro)}`);
+    });
     if (inspecaoAtualId === id) limparInspecaoAtual();
   }
 
   function excluirTodasMinhasInspecoes() {
     if (!window.confirm("Deseja excluir TODAS as suas inspeções salvas?")) return;
-    setInspecoes((prev) => prev.filter((insp) => insp.usuarioId !== usuarioLogado.id));
+    const usuarioId = usuarioLogado.id;
+    setInspecoes((prev) => prev.filter((insp) => insp.usuarioId !== usuarioId));
+    excluirInspecoesDoUsuarioFirebase(usuarioId).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao excluir inspeções online: ${mensagemErroFirebase(erro)}`);
+    });
     limparInspecaoAtual();
   }
 
-  function fazerCadastro(e) {
+  async function fazerCadastro(e) {
     e.preventDefault();
     const email = normalizarEmail(authForm.email);
     const senhaCadastro = senhaLimpa(authForm.senha);
@@ -1039,8 +1141,8 @@ export default function App() {
       return;
     }
 
-    if (senhaCadastro.length < 4) {
-      alert("A senha deve ter pelo menos 4 caracteres.");
+    if (senhaCadastro.length < 6) {
+      alert("A senha deve ter pelo menos 6 caracteres para o Firebase Authentication.");
       return;
     }
 
@@ -1050,60 +1152,72 @@ export default function App() {
       return;
     }
 
-    const emailJaExiste = usuarios.some((u) => normalizarEmail(u.email) === email);
+    try {
+      await cadastrarUsuarioFirebase({
+        nomeCompleto,
+        email,
+        telefone,
+        cpf,
+        senha: senhaCadastro,
+      });
 
-    if (emailJaExiste) {
-      alert("Este e-mail já está cadastrado. Faça login ou use outro e-mail.");
-      return;
+      setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
+      setMostrarSenha(false);
+      alert("Cadastro enviado com sucesso. Aguarde aprovação do administrador Velox para acessar o sistema.");
+      setModoAuth("login");
+    } catch (erro) {
+      console.error(erro);
+      alert(mensagemErroFirebase(erro));
     }
-
-    const novoUsuario = {
-      id: gerarId("USR"),
-      nomeCompleto,
-      email,
-      telefone,
-      cpf,
-      senha: senhaCadastro,
-      ativo: false,
-      tipo: "inspetor",
-      adminMaster: false,
-      statusCadastro: "pendente",
-      criadoEm: new Date().toISOString(),
-      aprovadoEm: "",
-    };
-
-    setUsuarios((prev) => [...prev, novoUsuario]);
-    setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
-    setMostrarSenha(false);
-    alert("Cadastro enviado com sucesso. Aguarde aprovação do administrador Velox para acessar o sistema.");
-    setModoAuth("login");
   }
 
-  function fazerLogin(e) {
+  async function fazerLogin(e) {
     e.preventDefault();
     const email = normalizarEmail(authForm.email);
     const senhaDigitada = senhaLimpa(authForm.senha);
-    const usuario = usuarios.find(
-      (u) => normalizarEmail(u.email) === email && senhaLimpa(u.senha) === senhaDigitada
-    );
 
-    if (!usuario) {
-      alert("E-mail ou senha inválidos.");
-      return;
+    try {
+      const usuario = await entrarUsuarioFirebase(email, senhaDigitada, {
+        email: ADMIN_MASTER_EMAIL,
+        senhaInicial: ADMIN_MASTER_SENHA_INICIAL,
+        nomeCompleto: ADMIN_MASTER_NOME,
+        telefone: ADMIN_MASTER_TELEFONE,
+        cpf: ADMIN_MASTER_CPF,
+      });
+
+      if (!usuario) {
+        alert("Usuário não encontrado.");
+        return;
+      }
+
+      const usuarioSeguro = {
+        ...usuario,
+        id: usuario.id || usuario.uid,
+        email: normalizarEmail(usuario.email),
+      };
+
+      if (usuarioSeguro.ativo === false) {
+        await sairFirebase();
+        alert(usuarioSeguro.statusCadastro === "bloqueado" ? "Usuário bloqueado pelo administrador." : "Cadastro pendente de aprovação pelo administrador Velox.");
+        return;
+      }
+
+      setUsuarioLogado(usuarioSeguro);
+      setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
+      setMostrarSenha(false);
+    } catch (erro) {
+      console.error(erro);
+      alert(mensagemErroFirebase(erro));
     }
-
-    if (usuario.ativo === false) {
-      alert(usuario.statusCadastro === "bloqueado" ? "Usuário bloqueado pelo administrador." : "Cadastro pendente de aprovação pelo administrador Velox.");
-      return;
-    }
-
-    setUsuarioLogado(usuario);
-    setAuthForm({ nomeCompleto: "", email: "", telefone: "", cpf: "", senha: "" });
-    setMostrarSenha(false);
   }
 
-  function sair() {
+  async function sair() {
     if (!window.confirm("Deseja sair do sistema?")) return;
+    try {
+      await sairFirebase();
+    } catch (erro) {
+      console.error(erro);
+    }
     sessionStorage.removeItem(STORAGE_KEYS.usuarioLogado);
     localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
     setUsuarioLogado(null);
@@ -1117,14 +1231,16 @@ export default function App() {
   function aprovarUsuario(usuarioId) {
     if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
-    setUsuarios((prev) =>
-      prev.map((usuario) =>
-        usuario.id === usuarioId
-          ? { ...usuario, ativo: true, statusCadastro: "aprovado", aprovadoEm: new Date().toISOString() }
-          : usuario
-      )
-    );
-    if (usuario) alert(`Usuário ${usuario.nomeCompleto} aprovado. Ele deve entrar com o mesmo e-mail e senha cadastrados.`);
+    atualizarUsuarioFirebase(usuarioId, {
+      ativo: true,
+      statusCadastro: "aprovado",
+      aprovadoEm: new Date().toISOString(),
+    }).then(() => {
+      if (usuario) alert(`Usuário ${usuario.nomeCompleto} aprovado. Ele deve entrar com o mesmo e-mail e senha cadastrados.`);
+    }).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao aprovar usuário: ${mensagemErroFirebase(erro)}`);
+    });
   }
 
   function bloquearUsuario(usuarioId) {
@@ -1133,53 +1249,59 @@ export default function App() {
     if (!usuario || usuario.id === usuarioLogado.id) return;
     if (!window.confirm(`Deseja bloquear o acesso de ${usuario.nomeCompleto}?`)) return;
 
-    setUsuarios((prev) =>
-      prev.map((u) =>
-        u.id === usuarioId
-          ? { ...u, ativo: false, statusCadastro: "bloqueado", bloqueadoEm: new Date().toISOString() }
-          : u
-      )
-    );
+    atualizarUsuarioFirebase(usuarioId, {
+      ativo: false,
+      statusCadastro: "bloqueado",
+      bloqueadoEm: new Date().toISOString(),
+    }).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao bloquear usuário: ${mensagemErroFirebase(erro)}`);
+    });
   }
 
   function desbloquearUsuario(usuarioId) {
     if (!ehAdmin(usuarioLogado)) return;
-    setUsuarios((prev) =>
-      prev.map((usuario) =>
-        usuario.id === usuarioId
-          ? { ...usuario, ativo: true, statusCadastro: "aprovado", aprovadoEm: usuario.aprovadoEm || new Date().toISOString() }
-          : usuario
-      )
-    );
+    const usuario = usuarios.find((u) => u.id === usuarioId);
+    atualizarUsuarioFirebase(usuarioId, {
+      ativo: true,
+      statusCadastro: "aprovado",
+      aprovadoEm: usuario?.aprovadoEm || new Date().toISOString(),
+    }).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao desbloquear usuário: ${mensagemErroFirebase(erro)}`);
+    });
   }
 
   function excluirUsuario(usuarioId) {
     if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario || usuario.id === usuarioLogado.id) return;
+    if (ehAdminMaster(usuario)) {
+      alert("O Admin Master não pode ser excluído pelo painel.");
+      return;
+    }
     if (!window.confirm(`Excluir o usuário ${usuario.nomeCompleto} e todas as inspeções vinculadas a ele?`)) return;
 
-    setUsuarios((prev) => prev.filter((u) => u.id !== usuarioId));
-    setInspecoes((prev) => prev.filter((insp) => insp.usuarioId !== usuarioId));
+    excluirUsuarioFirebase(usuarioId).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao excluir usuário: ${mensagemErroFirebase(erro)}`);
+    });
+    excluirInspecoesDoUsuarioFirebase(usuarioId).catch((erro) => console.error(erro));
     if (adminUsuarioSelecionado === usuarioId) setAdminUsuarioSelecionado("");
   }
 
   function resetarSenhaUsuario(usuarioId) {
     if (!ehAdmin(usuarioLogado)) return;
     const usuario = usuarios.find((u) => u.id === usuarioId);
-    if (!usuario) return;
-    const novaSenha = window.prompt(`Digite a nova senha para ${usuario.nomeCompleto}:`);
-    const senhaLimpa = String(novaSenha || "").trim();
-    if (!senhaLimpa) return;
-    if (senhaLimpa.length < 4) {
-      alert("A nova senha deve ter pelo menos 4 caracteres.");
-      return;
-    }
+    if (!usuario?.email) return;
+    if (!window.confirm(`Enviar e-mail de redefinição de senha para ${usuario.email}?`)) return;
 
-    setUsuarios((prev) =>
-      prev.map((u) => (u.id === usuarioId ? { ...u, senha: senhaLimpa, senhaAlteradaEm: new Date().toISOString() } : u))
-    );
-    alert("Senha alterada com sucesso.");
+    enviarResetSenhaFirebase(usuario.email).then(() => {
+      alert("E-mail de redefinição de senha enviado com sucesso.");
+    }).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao enviar redefinição de senha: ${mensagemErroFirebase(erro)}`);
+    });
   }
 
   function alternarTipoAdmin(usuarioId) {
@@ -1189,13 +1311,21 @@ export default function App() {
     }
     const usuario = usuarios.find((u) => u.id === usuarioId);
     if (!usuario || usuario.id === usuarioLogado.id) return;
+    if (ehAdminMaster(usuario)) {
+      alert("O Admin Master oficial não pode ser rebaixado.");
+      return;
+    }
     const usuarioEhAdmin = ehAdmin(usuario);
     const novoTipo = usuarioEhAdmin ? "inspetor" : "admin";
     if (!window.confirm(`Deseja transformar ${usuario.nomeCompleto} em ${novoTipo === "admin" ? "administrador" : "inspetor"}?`)) return;
 
-    setUsuarios((prev) =>
-      prev.map((u) => (u.id === usuarioId ? { ...u, tipo: novoTipo } : u))
-    );
+    atualizarUsuarioFirebase(usuarioId, {
+      tipo: novoTipo,
+      adminMaster: false,
+    }).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao alterar perfil: ${mensagemErroFirebase(erro)}`);
+    });
   }
 
   async function exportarExcelPremium() {
@@ -1209,6 +1339,13 @@ export default function App() {
 
       const logoBase64 = await urlParaBase64(logoVelox);
       const logoId = workbook.addImage({ base64: logoBase64, extension: extensaoImagem(logoBase64) });
+      const resumoRelatorio = calcularResumoRelatorio();
+
+      if (resumoRelatorio.total === 0) {
+        alert("Nenhum item CONFORME ou NÃO CONFORME foi inspecionado. O relatório não será gerado.");
+        return;
+      }
+
       const evidencias = montarEvidencias(true);
 
       const wsResumo = workbook.addWorksheet("Resumo Geral", {
@@ -1236,12 +1373,12 @@ export default function App() {
         ["RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
         ["RBAC 154", configAerodromo.codigoReferenciaRBAC154],
         ["RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
-        ["Total aplicável", resumoGeral.total],
-        ["Percentual concluído", `${resumoGeral.percentual}%`],
-        ["Conformes", resumoGeral.contagem["CONFORME"]],
-        ["Não conformes", resumoGeral.contagem["NÃO CONFORME"]],
-        ["Não aplicáveis", resumoGeral.contagem["NÃO APLICÁVEL"]],
-        ["Não verificados", resumoGeral.contagem["NÃO VERIFICADO"]],
+        ["Total inspecionado no relatório", resumoRelatorio.total],
+        ["Conformes inspecionados", resumoRelatorio.conforme],
+        ["Não conformes inspecionados", resumoRelatorio.naoConforme],
+        ["Evidências fotográficas no relatório", resumoRelatorio.evidencias],
+        ["Itens não aplicáveis", "Não incluídos no relatório"],
+        ["Itens não verificados", "Não incluídos no relatório"],
       ];
 
       resumoLinhas.forEach((linha, index) => {
@@ -1285,7 +1422,7 @@ export default function App() {
       NORMAS_IDS.forEach((normaId) => {
         const norma = NORMAS[normaId] || { itens: [] };
         const respostasNorma = respostasPorNorma[normaId] || {};
-        const itens = itensAplicaveisDaNorma(normaId);
+        const itens = itensInspecionadosParaRelatorio(normaId);
 
         itens.forEach((item) => {
           const chave = item.id || item.ref;
@@ -1391,6 +1528,13 @@ export default function App() {
       const largura = doc.internal.pageSize.getWidth();
       const altura = doc.internal.pageSize.getHeight();
       const logoBase64 = await urlParaBase64(logoVelox);
+      const resumoRelatorio = calcularResumoRelatorio();
+
+      if (resumoRelatorio.total === 0) {
+        alert("Nenhum item CONFORME ou NÃO CONFORME foi inspecionado. O relatório não será gerado.");
+        return;
+      }
+
       const evidencias = montarEvidencias(true);
 
       function rodape(paginaTitulo = "") {
@@ -1448,7 +1592,7 @@ export default function App() {
         ["RBAC 153", configAerodromo.classificacaoRBAC153 || configAerodromo.classeRBAC153],
         ["RBAC 154", configAerodromo.codigoReferenciaRBAC154],
         ["RBAC 107", configAerodromo.categoriaRBAC107 || "AP-0"],
-        ["Conclusão geral", `${resumoGeral.percentual}%`],
+        ["Itens no relatório", `${resumoRelatorio.total} item(ns) inspecionado(s)`],
       ];
 
       let y = 54;
@@ -1465,11 +1609,11 @@ export default function App() {
 
       y += 10;
       const indicadores = [
-        ["Total", resumoGeral.total, "0A1F12"],
-        ["Conforme", resumoGeral.contagem["CONFORME"], "16A34A"],
-        ["Não Conf.", resumoGeral.contagem["NÃO CONFORME"], "EF4444"],
-        ["N/A", resumoGeral.contagem["NÃO APLICÁVEL"], "64748B"],
-        ["Pendente", resumoGeral.contagem["NÃO VERIFICADO"], "C9A300"],
+        ["Relatório", resumoRelatorio.total, "0A1F12"],
+        ["Conforme", resumoRelatorio.conforme, "16A34A"],
+        ["Não Conf.", resumoRelatorio.naoConforme, "EF4444"],
+        ["Evidências", resumoRelatorio.evidencias, "64748B"],
+        ["Filtrados", "N/A + NV", "C9A300"],
       ];
 
       indicadores.forEach(([label, valor, cor], index) => {
@@ -1487,20 +1631,34 @@ export default function App() {
       NORMAS_IDS.forEach((normaId) => {
         const norma = NORMAS[normaId] || { nome: normaId, itens: [] };
         const respostasNorma = respostasPorNorma[normaId] || {};
-        const itens = itensAplicaveisDaNorma(normaId);
-        const resumoNorma = calcularResumoNorma(normaId);
+        const itens = itensInspecionadosParaRelatorio(normaId);
+        const resumoNormaRelatorio = resumoRelatorio.porNorma[normaId] || {
+          total: 0,
+          conforme: 0,
+          naoConforme: 0,
+          evidencias: 0,
+        };
+
+        if (itens.length === 0) return;
 
         doc.addPage();
         cabecalho(`${norma.nome || normaId} - Itens Inspecionados`);
         doc.setFontSize(16);
         doc.setTextColor(10, 31, 18);
-        doc.text(`${norma.nome || normaId} • ${resumoNorma.percentual}% concluído`, 14, 40);
+        doc.text(
+          `${norma.nome || normaId} • ${resumoNormaRelatorio.total} item(ns) no relatório`,
+          14,
+          40
+        );
         y = 52;
 
         itens.forEach((item) => {
           const chave = item.id || item.ref;
           const resposta = respostasNorma[chave] || {};
           const status = resposta.status || "NÃO VERIFICADO";
+
+          if (!itemEntraNoRelatorio(status)) return;
+
           const textoItem = item.item || item.descricao || "Item de inspeção";
           const obs = resposta.obs || "-";
 
@@ -1889,8 +2047,8 @@ export default function App() {
           </div>
 
           <div className="grid section-space">
-            <div className="col-6"><button className="btn btn-dark" onClick={exportarExcelPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar Excel Completo"}</button></div>
-            <div className="col-6"><button className="btn btn-secondary" onClick={exportarPDFPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar PDF Completo"}</button></div>
+            <div className="col-6"><button className="btn btn-dark" onClick={exportarExcelPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar Excel Inspecionados"}</button></div>
+            <div className="col-6"><button className="btn btn-secondary" onClick={exportarPDFPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar PDF Inspecionados"}</button></div>
           </div>
 
           <div className="search-box"><label>Buscar no checklist<input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar item, referência, critério, evidência ou risco..." /></label></div>
