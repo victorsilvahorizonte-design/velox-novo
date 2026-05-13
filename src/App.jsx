@@ -10,6 +10,12 @@ import jsPDF from "jspdf";
 import { NORMAS } from "./data/normas";
 import { CONFIG_INICIAL_RBAC154 } from "./data/configuracaoAerodromo";
 import { verificarAplicabilidade } from "./utils/aplicabilidade";
+import {
+  verificarAplicabilidadeInfra,
+  gerarResumoTecnicoInfra,
+  gerarChecklistInfra,
+} from "./engines/infraEngine";
+import { avaliarConformidadeInfra } from "./engines/infraComplianceEngine";
 
 import {
   atualizarBaseANAC,
@@ -41,7 +47,7 @@ const STATUS = [
   "NÃO APLICÁVEL",
 ];
 
-const NORMAS_IDS = ["RBAC153", "RBAC154", "RBAC107"];
+const NORMAS_IDS = ["RBAC153", "RBAC154", "RBAC107", "INFRA"];
 
 const STORAGE_KEYS = {
   usuarios: "velox_usuarios",
@@ -444,6 +450,15 @@ function corStatus(status) {
   return "C9A300";
 }
 
+
+function verificarAplicabilidadePorNorma(normaId, item, configAerodromo) {
+  if (normaId === "INFRA") {
+    return verificarAplicabilidadeInfra(item, configAerodromo);
+  }
+
+  return verificarAplicabilidade(item, configAerodromo);
+}
+
 function criarSnapshotAeroporto(configAerodromo) {
   return {
     icao: configAerodromo.icao || "",
@@ -666,7 +681,16 @@ export default function App() {
 
   function itensAplicaveisDaNorma(normaId) {
     const norma = NORMAS[normaId] || { itens: [] };
-    return (norma.itens || []).filter((item) => verificarAplicabilidade(item, configAerodromo));
+
+    if (normaId === "INFRA") {
+      return gerarChecklistInfra(norma.itens || [], configAerodromo).filter(
+        (item) => item.aplicavel !== false
+      );
+    }
+
+    return (norma.itens || []).filter((item) =>
+      verificarAplicabilidadePorNorma(normaId, item, configAerodromo)
+    );
   }
 
   const itensAplicaveis = useMemo(() => itensAplicaveisDaNorma(normaSelecionada), [normaSelecionada, configAerodromo]);
@@ -685,7 +709,9 @@ export default function App() {
 
   function calcularResumoNorma(normaId, config = configAerodromo, respostasBase = respostasPorNorma[normaId] || {}) {
     const norma = NORMAS[normaId] || { itens: [] };
-    const itens = (norma.itens || []).filter((item) => verificarAplicabilidade(item, config));
+    const itens = (norma.itens || []).filter((item) =>
+      verificarAplicabilidadePorNorma(normaId, item, config)
+    );
     const contagem = STATUS.reduce((acc, status) => {
       acc[status] = 0;
       return acc;
@@ -715,6 +741,11 @@ export default function App() {
     () => calcularResumoNorma(normaSelecionada),
     [normaSelecionada, configAerodromo, respostasPorNorma]
   );
+
+  const resumoTecnicoInfra = useMemo(() => {
+    if (normaSelecionada !== "INFRA") return null;
+    return gerarResumoTecnicoInfra(configAerodromo);
+  }, [normaSelecionada, configAerodromo]);
 
   const resumoGeral = useMemo(() => {
     const base = STATUS.reduce((acc, status) => {
@@ -2054,6 +2085,126 @@ export default function App() {
           <div className="search-box"><label>Buscar no checklist<input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar item, referência, critério, evidência ou risco..." /></label></div>
         </section>
 
+
+        {normaSelecionada === "INFRA" && resumoTecnicoInfra && (
+          <section className="infra-panel">
+            <div className="infra-header">
+              <div>
+                <h2>Painel Técnico INFRA</h2>
+                <p>
+                  Assistente técnico aeroportuário com parâmetros calculados automaticamente
+                  conforme código de referência, operação IFR/VFR e operação noturna.
+                </p>
+              </div>
+
+              <span className="infra-badge">
+                {resumoTecnicoInfra.codigoReferencia}
+              </span>
+            </div>
+
+            <div className="infra-grid">
+              <div className="infra-card">
+                <h3>Operação</h3>
+                <p>
+                  {resumoTecnicoInfra.tipoOperacao}
+                  {resumoTecnicoInfra.operacaoNoturna
+                    ? " • NOTURNA"
+                    : " • DIURNA"}
+                </p>
+              </div>
+
+              <div className="infra-card">
+                <h3>Pista</h3>
+                <p>
+                  Largura mínima:{" "}
+                  <strong>{resumoTecnicoInfra.larguraMinimaPista}</strong>
+                </p>
+              </div>
+
+              <div className="infra-card">
+                <h3>Faixa de Pista</h3>
+                <p>
+                  Largura esperada:{" "}
+                  <strong>
+                    {resumoTecnicoInfra.faixaPista || "Verificar cenário"}
+                  </strong>
+                </p>
+              </div>
+
+              <div className="infra-card">
+                <h3>Taxiway</h3>
+                <p>
+                  Largura referencial:{" "}
+                  <strong>{resumoTecnicoInfra.larguraTaxiwayReferencial}</strong>
+                </p>
+              </div>
+
+              <div className="infra-card">
+                <h3>RESA</h3>
+                <p>
+                  {resumoTecnicoInfra.exigeRESA
+                    ? "OBRIGATÓRIA"
+                    : "VERIFICAR APLICABILIDADE"}
+                </p>
+                <small>
+                  Comprimento esperado:{" "}
+                  <strong>
+                  {resumoTecnicoInfra.dimensaoRESA || "Verificar cenário"}
+                  </strong>
+                </small>
+              </div>
+
+              <div className="infra-card">
+                <h3>Faixa Preparada</h3>
+                <p>
+                  {resumoTecnicoInfra.exigeFaixaPreparada ? "EXIGIDA" : "PADRÃO"}
+                </p>
+                <small>
+                  Parâmetro esperado:{" "}
+                  <strong>
+                    {resumoTecnicoInfra.faixaPreparada || "Verificar cenário"}
+                  </strong>
+                </small>
+              </div>
+
+              <div className="infra-card">
+                <h3>Sinalização</h3>
+                <p>
+                  {resumoTecnicoInfra.exigeSinalizacaoLuminosa
+                    ? "LUMINOSA OBRIGATÓRIA"
+                    : "PADRÃO DIURNO"}
+                </p>
+              </div>
+
+              <div className="infra-card">
+                <h3>Posição de Espera IFR</h3>
+                <p>
+                  {resumoTecnicoInfra.exigePosicaoEsperaIFR
+                    ? "EXIGIDA"
+                    : "CONFORME CENÁRIO"}
+                </p>
+              </div>
+            </div>
+
+            <div className="infra-alertas">
+              <h3>Alertas Operacionais</h3>
+
+              {resumoTecnicoInfra.alertasOperacionais?.length ? (
+                resumoTecnicoInfra.alertasOperacionais.map((alerta, index) => (
+                  <div key={index} className="infra-alerta">
+                    ⚠ {alerta}
+                  </div>
+                ))
+              ) : (
+                <div className="infra-ok">
+                  Nenhum alerta operacional relevante para o cenário atual.
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+
         <section>
           {itensVisiveis.length === 0 && <div className="card">Nenhum item aplicável encontrado para os parâmetros atuais.</div>}
 
@@ -2062,15 +2213,161 @@ export default function App() {
             const resposta = respostas[chave] || {};
             const statusAtual = resposta.status || "NÃO VERIFICADO";
 
+            const exigeValorNumericoInfra =
+              normaSelecionada === "INFRA" &&
+              item.exigeValorNumerico === true;
+
+            const analiseConformidadeCampo =
+              normaSelecionada === "INFRA" &&
+              exigeValorNumericoInfra &&
+              resposta.valorEncontrado
+                ? avaliarConformidadeInfra({
+                    grupo: item.grupo || item.item || item.id || item.ref,
+                    valorEncontrado: resposta.valorEncontrado,
+                    valorEsperado:
+                      item.valorEsperadoComparacao ||
+                      item.parametroEsperadoCalculado,
+                    tipoComparacao: item.tipoComparacao || "MINIMO",
+                    valorLimite: item.valorLimite || null,
+                  })
+                : null;
+
             return (
               <article key={chave} className="checklist-item">
                 <div className="checklist-head"><span className="item-ref">{item.ref || item.id}</span><span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span></div>
                 <h3 className="item-title">{item.item || item.descricao || "Item de verificação"}</h3>
                 {item.subparte && <p className="item-text"><strong>Subparte:</strong> {item.subparte}</p>}
                 {item.descricao && item.item && <p className="item-text">{item.descricao}</p>}
-                {item.criterio && <p className="item-text"><strong>Critério:</strong> {item.criterio}</p>}
+                {(item.criterioTecnicoCalculado || item.criterio) && (
+                  <div className="item-text">
+                    <strong>Critério:</strong>
+                    <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "8px 0 0", color: "inherit", lineHeight: 1.6 }}>
+                      {normaSelecionada === "INFRA"
+                        ? item.criterioTecnicoCalculado || item.criterio
+                        : item.criterio}
+                    </pre>
+                  </div>
+                )}
                 {item.evidencias && <p className="item-text"><strong>Evidências esperadas:</strong> {item.evidencias}</p>}
                 {item.risco && <p className="item-text"><strong>Risco:</strong> {item.risco}</p>}
+                {normaSelecionada === "INFRA" && item.parametroEsperadoCalculado && (
+                  <div className="item-text infra-parametro-item">
+                    <strong>Parâmetro técnico calculado:</strong>
+                    <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "8px 0 0", color: "inherit", lineHeight: 1.6 }}>
+                      {item.parametroEsperadoCalculado}
+                    </pre>
+                  </div>
+                )}
+                {normaSelecionada === "INFRA" && item.comoInspecionarCalculado && (
+                  <div className="item-text infra-parametro-item">
+                    <strong>Como inspecionar em campo:</strong>
+                    <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "8px 0 0", color: "inherit", lineHeight: 1.6 }}>
+                      {item.comoInspecionarCalculado}
+                    </pre>
+                  </div>
+                )}
+
+                {normaSelecionada === "INFRA" && (
+                  <div className="item-text infra-parametro-item" style={{ border: "1px solid rgba(56, 189, 248, 0.28)", borderRadius: 14, padding: 14, background: "rgba(15, 23, 42, 0.28)" }}>
+                    {exigeValorNumericoInfra ? (
+                      <>
+                        <strong>Valor encontrado em campo:</strong>
+
+                        {item.logicaConformidade && (
+                          <p style={{ margin: "8px 0 0", opacity: 0.9 }}>
+                            <strong>Lógica de conformidade:</strong>{" "}
+                            {item.logicaConformidade}
+                          </p>
+                        )}
+
+                        <div className="grid field-grid" style={{ marginTop: 10 }}>
+                          <div className="col-6">
+                            <label>
+                              Valor medido / encontrado
+                              <input
+                                value={resposta.valorEncontrado || ""}
+                                onChange={(e) =>
+                                  atualizarResposta(item, "valorEncontrado", e.target.value)
+                                }
+                                placeholder={
+                                  item.tipoComparacao === "MAXIMO"
+                                    ? `Ex.: 14 ${item.unidade || ""}`
+                                    : "Ex.: 90 m, 90 x 60 m, 75 m"
+                                }
+                              />
+                            </label>
+                          </div>
+
+                          <div className="col-6">
+                            <label>
+                              Resultado automático
+                              <input
+                                value={analiseConformidadeCampo?.status || "NÃO VERIFICADO"}
+                                readOnly
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        {item.tipoComparacao && (
+                          <p style={{ margin: "8px 0 0", opacity: 0.85 }}>
+                            <strong>Tipo de comparação:</strong>{" "}
+                            {item.tipoComparacao}
+                            {item.valorLimite !== null && item.valorLimite !== undefined
+                              ? ` • Limite: ${item.valorLimite} ${item.unidade || ""}`
+                              : ""}
+                          </p>
+                        )}
+
+                        {analiseConformidadeCampo && (
+                          <div style={{ marginTop: 10 }}>
+                            <p style={{ margin: "4px 0" }}>
+                              <strong>Status:</strong> {analiseConformidadeCampo.status}
+                            </p>
+                            <p style={{ margin: "4px 0" }}>
+                              <strong>Criticidade:</strong> {analiseConformidadeCampo.criticidade}
+                            </p>
+                            <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", margin: "8px 0 0", color: "inherit", lineHeight: 1.6 }}>
+                              {analiseConformidadeCampo.recomendacao}
+                            </pre>
+
+                            {(analiseConformidadeCampo.status === "CONFORME" ||
+                              analiseConformidadeCampo.status === "NÃO CONFORME") && (
+                              <button
+                                type="button"
+                                className="status-btn"
+                                onClick={() =>
+                                  atualizarResposta(
+                                    item,
+                                    "status",
+                                    analiseConformidadeCampo.status
+                                  )
+                                }
+                              >
+                                Aplicar status automático
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <strong>Avaliação qualitativa do inspetor:</strong>
+                        <p style={{ margin: "8px 0 0", opacity: 0.9 }}>
+                          Este item não exige valor numérico. Avalie a condição observada em campo e marque
+                          CONFORME ou NÃO CONFORME nos botões abaixo.
+                        </p>
+
+                        {item.logicaConformidade && (
+                          <p style={{ margin: "8px 0 0", opacity: 0.9 }}>
+                            <strong>Lógica de conformidade:</strong>{" "}
+                            {item.logicaConformidade}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
 
                 <div className="status-row">
                   {STATUS.map((status) => {
