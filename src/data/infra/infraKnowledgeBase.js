@@ -1,40 +1,24 @@
 // src/data/infra/infraKnowledgeBase.js
 // Base inteligente de conhecimento técnico INFRA
 // V3 / infra-lab
-// Fontes principais:
-// - RBAC 154: infraestrutura, geometria, dimensões, faixa, RESA, pista, taxiway, sinalização e auxílios visuais.
-// - RBAC 153: operação, manutenção, pavimento, vegetação, drenagem, FOD, inspeções e condição operacional.
-// - RBAC 107: AVSEC, controle de acesso, áreas restritas, cercas, barreiras e proteção do lado ar.
-// - Manual SAC/MINFRA/ITA 2021: apoio conceitual e de engenharia, nunca como fonte normativa principal.
 
 export const INFRA_KNOWLEDGE_BASE = {
     vegetacao: {
       id: "vegetacao",
-  
       assunto: "Vegetação em áreas operacionais",
-  
       tipoComparacao: "MAXIMO",
-  
       valorLimite: 15,
-  
       unidade: "cm",
-  
       exigeValorNumerico: true,
-  
       parametro:
-        "A vegetação em áreas operacionais, especialmente faixa de pista e áreas adjacentes, deve permanecer controlada, baixa e sem interferir na segurança operacional. Altura máxima operacional recomendada: 15 cm.",
-  
+        "Vegetação controlada em áreas operacionais. Altura máxima operacional recomendada: 15 cm.",
       criterioTecnico:
-        "Vegetação acima de 15 cm pode ocultar obstáculos, favorecer fauna, comprometer drenagem, reduzir visibilidade de sinalização e dificultar inspeções operacionais.",
-  
+        "Vegetação acima de 15 cm pode ocultar obstáculos, favorecer fauna, comprometer drenagem, reduzir visibilidade de sinalização e dificultar inspeções.",
       comoInspecionar:
-        "Medir ou estimar altura predominante da vegetação na faixa de pista e áreas adjacentes. Verificar vegetação densa, moitas, arbustos, árvores, acúmulo orgânico, atração de fauna e interferência na drenagem.",
-  
+        "Medir ou estimar altura predominante da vegetação na faixa de pista e áreas adjacentes.",
       logicaConformidade:
         "CONFORME quando altura da vegetação for menor ou igual a 15 cm.",
-  
       criticidade: "MÉDIA",
-  
       origem: "RBAC 153 / manutenção operacional",
     },
   
@@ -44,15 +28,15 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A zona de toque deve permanecer sem acúmulo excessivo de borracha que comprometa atrito, frenagem, aderência ou segurança operacional.",
+        "A zona de toque deve permanecer sem acúmulo excessivo de borracha.",
       criterioTecnico:
-        "Acúmulo de borracha pode reduzir coeficiente de atrito, aumentar distância de parada, elevar risco em pista molhada e indicar necessidade de medição de atrito ou remoção.",
+        "Acúmulo de borracha pode reduzir coeficiente de atrito.",
       comoInspecionar:
-        "Inspecionar visualmente as zonas de toque das cabeceiras em operação. Observar manchas escuras contínuas, polimento superficial, contaminação, perda aparente de textura e necessidade de ensaio de atrito.",
+        "Inspecionar visualmente as zonas de toque.",
       logicaConformidade:
-        "Avaliação qualitativa: CONFORME quando não houver acúmulo relevante de borracha; NÃO CONFORME quando houver acúmulo capaz de comprometer atrito ou indicar necessidade de intervenção.",
+        "Avaliação qualitativa do acúmulo de borracha.",
       criticidade: "ALTA",
-      origem: "RBAC 153 / manutenção de pavimentos e segurança operacional",
+      origem: "RBAC 153",
     },
   
     pavimentoPista: {
@@ -61,13 +45,13 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "O pavimento da pista deve permanecer íntegro, regular, sem defeitos críticos, sem FOD e sem degradação que comprometa rolamento, controle direcional, frenagem ou segurança operacional.",
+        "Pavimento íntegro, regular e sem defeitos críticos.",
       criterioTecnico:
-        "Trincas, buracos, deformações, recalques, desagregação, remendos inadequados e material solto podem gerar FOD, perda de controle, dano a aeronaves e redução da segurança.",
+        "Defeitos podem gerar FOD e comprometer frenagem.",
       comoInspecionar:
-        "Verificar trincas, buracos, remendos, juntas abertas, afundamentos, ondulações, deformações, borracha acumulada, material solto, FOD e condição superficial geral.",
+        "Verificar trincas, buracos, deformações e material solto.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual e operacional.",
+        "Avaliação qualitativa do pavimento.",
       criticidade: "ALTA",
       origem: "RBAC 153 / RBAC 154",
     },
@@ -78,15 +62,15 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A pista deve permanecer sem acúmulo de água, lâminas d’água, poças persistentes ou condições que favoreçam aquaplanagem.",
+        "A pista deve permanecer sem empoçamentos.",
       criterioTecnico:
-        "Drenagem inadequada pode comprometer aderência, aumentar distância de frenagem, gerar aquaplanagem e degradar o pavimento.",
+        "Drenagem inadequada aumenta risco de aquaplanagem.",
       comoInspecionar:
-        "Verificar poças, pontos baixos, lâminas d’água, escoamento superficial, marcas de fluxo, obstrução de dispositivos de drenagem e sinais de aquaplanagem.",
+        "Verificar poças, pontos baixos e escoamento.",
       logicaConformidade:
-        "Avaliação qualitativa: CONFORME quando não houver acúmulo relevante; NÃO CONFORME quando houver empoçamento, lâmina d’água ou risco de aquaplanagem.",
+        "CONFORME quando não houver acúmulo significativo de água.",
       criticidade: "ALTA",
-      origem: "RBAC 153 / manutenção operacional",
+      origem: "RBAC 153",
     },
   
     drenagemFaixa: {
@@ -95,13 +79,13 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A faixa de pista deve possuir drenagem funcional, sem erosões, valas perigosas, saturação de solo ou carreamento de material que comprometa a segurança.",
+        "A faixa deve possuir drenagem funcional.",
       criterioTecnico:
-        "Erosões, valas e saturação podem reduzir suporte da área, criar obstáculos perigosos e comprometer a função protetiva da faixa.",
+        "Erosões e valas podem comprometer suporte operacional.",
       comoInspecionar:
-        "Verificar erosões, valas, bueiros, caixas, canais, obstruções, solo saturado, acúmulo de água e carreamento de material.",
+        "Verificar erosões, valas e solo saturado.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual da condição de drenagem e erosão.",
+        "Avaliação qualitativa da drenagem da faixa.",
       criticidade: "ALTA",
       origem: "RBAC 153 / RBAC 154",
     },
@@ -112,15 +96,15 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A RESA deve permanecer drenada, sem empoçamento, erosão crítica, valas perigosas ou drenagem exposta que comprometa sua função de segurança.",
+        "RESA sem erosões críticas ou empoçamentos.",
       criterioTecnico:
-        "A drenagem inadequada pode reduzir suporte do solo, gerar erosões e transformar a RESA em área de risco em caso de excursão de pista.",
+        "Falhas de drenagem reduzem suporte da RESA.",
       comoInspecionar:
-        "Verificar acúmulo de água, valas, erosões, saturação do solo, dispositivos de drenagem expostos, taludes e pontos de instabilidade.",
+        "Verificar erosões, água acumulada e saturação.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual da RESA.",
+        "Avaliação qualitativa da drenagem da RESA.",
       criticidade: "ALTA",
-      origem: "RBAC 153 / RBAC 154",
+      origem: "RBAC 154",
     },
   
     obstaculosResa: {
@@ -129,15 +113,15 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A RESA deve permanecer livre de obstáculos incompatíveis, objetos fixos, cercas, equipamentos, valas perigosas, taludes agressivos ou interferências que comprometam a segurança.",
+        "RESA livre de obstáculos incompatíveis.",
       criterioTecnico:
-        "Obstáculos na RESA podem agravar danos à aeronave em caso de pouso antes da cabeceira ou ultrapassagem do final de pista.",
+        "Obstáculos agravam danos em excursões.",
       comoInspecionar:
-        "Percorrer visualmente a RESA, registrar obstáculos, cercas, postes, equipamentos, valas, vegetação densa, taludes e objetos fixos com foto e localização aproximada.",
+        "Percorrer visualmente a RESA.",
       logicaConformidade:
-        "Avaliação qualitativa: CONFORME quando a RESA estiver livre de obstáculos incompatíveis; NÃO CONFORME quando houver interferência perigosa.",
+        "CONFORME quando a RESA estiver livre de obstáculos incompatíveis.",
       criticidade: "CRÍTICA",
-      origem: "RBAC 154 / segurança operacional",
+      origem: "RBAC 154",
     },
   
     superficieResa: {
@@ -146,15 +130,15 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A superfície da RESA deve estar regular, nivelada, sem erosões críticas, sem recalques relevantes, sem material solto e com suporte compatível com sua função de segurança.",
+        "Superfície regular e estável.",
       criterioTecnico:
-        "Irregularidades superficiais podem aumentar danos à aeronave, prejudicar desaceleração e comprometer a função da área de segurança.",
+        "Irregularidades aumentam danos à aeronave.",
       comoInspecionar:
-        "Verificar nivelamento, compactação, buracos, sulcos, recalques, material solto, erosões, trilhas de água e perda de suporte do solo.",
+        "Verificar nivelamento e suporte.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual e operacional.",
+        "Avaliação qualitativa da superfície.",
       criticidade: "ALTA",
-      origem: "RBAC 154 / RBAC 153",
+      origem: "RBAC 154",
     },
   
     obstaculosFaixa: {
@@ -163,32 +147,32 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A faixa de pista deve permanecer livre de obstáculos não frangíveis, objetos fixos incompatíveis, valas perigosas, vegetação inadequada e interferências operacionais.",
+        "Faixa livre de obstáculos incompatíveis.",
       criterioTecnico:
-        "A faixa de pista protege aeronaves em excursão lateral ou longitudinal. Objetos incompatíveis aumentam o risco de dano à aeronave.",
+        "Objetos incompatíveis aumentam danos em excursões.",
       comoInspecionar:
-        "Verificar objetos, equipamentos, cercas, postes, vegetação, valas, desníveis, drenagens expostas e materiais soltos dentro da faixa.",
+        "Verificar postes, objetos, vegetação e valas.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual da faixa de pista.",
+        "Avaliação qualitativa da faixa.",
       criticidade: "ALTA",
-      origem: "RBAC 154 / RBAC 153",
+      origem: "RBAC 154",
     },
   
     superficieFaixa: {
       id: "superficieFaixa",
-      assunto: "Nivelamento e regularidade da faixa de pista",
+      assunto: "Regularidade da faixa de pista",
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A faixa de pista deve apresentar superfície regular, sem desníveis perigosos, erosões críticas, recalques, valas ou perda de suporte.",
+        "Faixa com superfície regular.",
       criterioTecnico:
-        "A regularidade da faixa reduz danos à aeronave em caso de excursão e permite melhor condição operacional da área protegida.",
+        "Desníveis aumentam danos à aeronave.",
       comoInspecionar:
-        "Verificar nivelamento, buracos, erosões, recalques, valas, transições laterais, solo saturado, vegetação e presença de material solto.",
+        "Verificar erosões, recalques e irregularidades.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual da regularidade da faixa.",
+        "Avaliação qualitativa da faixa.",
       criticidade: "ALTA",
-      origem: "RBAC 154 / RBAC 153",
+      origem: "RBAC 154",
     },
   
     fod: {
@@ -197,15 +181,15 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "Áreas operacionais devem permanecer livres de objetos estranhos, detritos, pedras, peças, materiais soltos ou qualquer elemento capaz de causar dano à aeronave.",
+        "Áreas operacionais livres de FOD.",
       criterioTecnico:
-        "FOD pode causar ingestão por motores, perfuração de pneus, danos estruturais e eventos de segurança operacional.",
+        "FOD pode causar danos graves às aeronaves.",
       comoInspecionar:
-        "Inspecionar pista, taxiway, pátio, acostamentos, faixa preparada, drenagens, áreas de obra, bordas de pavimento e pontos de concentração de detritos.",
+        "Inspecionar pista, taxiway, pátio e acostamentos.",
       logicaConformidade:
-        "Avaliação qualitativa: CONFORME quando área estiver livre de FOD; NÃO CONFORME quando houver objetos ou detritos relevantes.",
+        "CONFORME quando área estiver livre de FOD.",
       criticidade: "ALTA",
-      origem: "RBAC 153 / segurança operacional",
+      origem: "RBAC 153",
     },
   
     sinalizacaoHorizontal: {
@@ -214,32 +198,32 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A sinalização horizontal deve estar visível, padronizada, contrastante, coerente com a operação e sem conflito operacional.",
+        "Sinalização visível e coerente.",
       criterioTecnico:
-        "Marcas apagadas, conflitantes ou mal posicionadas podem causar erro de navegação em solo, incursão em pista ou perda de consciência situacional.",
+        "Sinalização ruim aumenta risco operacional.",
       comoInspecionar:
-        "Verificar eixo, bordas, cabeceira, designação de pista, zona de toque, ponto de visada, taxiways, posição de espera, pátio e áreas interditadas.",
+        "Verificar eixo, bordas e marcações.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual da sinalização.",
+        "Avaliação qualitativa da sinalização.",
       criticidade: "ALTA",
-      origem: "RBAC 154 / RBAC 153",
+      origem: "RBAC 154",
     },
   
     sinalizacaoLuminosa: {
       id: "sinalizacaoLuminosa",
-      assunto: "Sinalização luminosa e balizamento",
+      assunto: "Sinalização luminosa",
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "Auxílios luminosos devem estar funcionais, alinhados, visíveis, com intensidade adequada e compatíveis com operação noturna ou IFR.",
+        "Auxílios luminosos operacionais.",
       criterioTecnico:
-        "Falhas em luzes de pista, taxiway, cabeceira, fim de pista ou PAPI podem comprometer orientação visual, aproximação, pouso, decolagem e taxiamento.",
+        "Falhas comprometem operações noturnas.",
       comoInspecionar:
-        "Verificar lâmpadas apagadas, desalinhadas, obstruídas, intensidade inadequada, falha de circuitos, balizamento de taxiway e sinalização luminosa de cabeceira/fim de pista.",
+        "Verificar alinhamento e funcionamento.",
       logicaConformidade:
-        "Avaliação qualitativa/funcional dos auxílios luminosos.",
+        "Avaliação qualitativa do balizamento.",
       criticidade: "ALTA",
-      origem: "RBAC 154 / RBAC 153",
+      origem: "RBAC 154",
     },
   
     taxiwayPavimento: {
@@ -248,83 +232,189 @@ export const INFRA_KNOWLEDGE_BASE = {
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A taxiway deve apresentar pavimento seguro, sem trincas críticas, buracos, deformações, FOD ou degradação que comprometa taxiamento.",
+        "Taxiway com pavimento íntegro.",
       criterioTecnico:
-        "Defeitos em taxiway podem gerar FOD, danos a pneus, perda de controle direcional e restrições operacionais.",
+        "Defeitos geram FOD e risco operacional.",
       comoInspecionar:
-        "Verificar juntas, trincas, buracos, remendos, desagregação, FOD, drenagem, acostamentos, bordas e transições.",
+        "Verificar trincas, buracos e deformações.",
       logicaConformidade:
-        "Avaliação qualitativa por inspeção visual da taxiway.",
+        "Avaliação qualitativa da taxiway.",
       criticidade: "MÉDIA",
       origem: "RBAC 153 / RBAC 154",
     },
   
-    cercaOperacional: {
-      id: "cercaOperacional",
-      assunto: "Cerca operacional / lado ar",
+    obstaculosTaxiway: {
+      id: "obstaculosTaxiway",
+      assunto: "Obstáculos laterais na taxiway",
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A cerca operacional deve proteger o lado ar e áreas de movimento, impedindo acesso não autorizado de pessoas, veículos e animais à área operacional.",
+        "Taxiway e áreas laterais livres de obstáculos incompatíveis.",
       criterioTecnico:
-        "A cerca operacional está vinculada à proteção da área operacional, pista, taxiway, pátio, áreas restritas e controle de acesso do lado ar.",
+        "Objetos laterais podem comprometer taxiamento.",
       comoInspecionar:
-        "Verificar continuidade da barreira, integridade, portões, cadeados, controle de acesso, brechas, pontos de invasão, sinais de passagem de animais, iluminação, vigilância e sinalização de área restrita.",
+        "Percorrer lateralmente a taxiway verificando objetos e interferências.",
       logicaConformidade:
-        "Avaliação qualitativa de integridade, continuidade e controle de acesso.",
+        "CONFORME quando não houver obstáculos incompatíveis.",
+      criticidade: "CRÍTICA",
+      origem: "RBAC 154",
+    },
+  
+    drenagemTaxiway: {
+      id: "drenagemTaxiway",
+      assunto: "Drenagem da taxiway",
+      tipoComparacao: "QUALITATIVO",
+      exigeValorNumerico: false,
+      parametro:
+        "Taxiway sem empoçamentos ou erosões críticas.",
+      criterioTecnico:
+        "Drenagem inadequada aumenta degradação do pavimento.",
+      comoInspecionar:
+        "Verificar canaletas, grelhas e pontos baixos.",
+      logicaConformidade:
+        "CONFORME quando não houver acúmulo de água.",
       criticidade: "ALTA",
-      origem: "RBAC 107 / RBAC 153 / apoio Manual ITA",
+      origem: "RBAC 153 / RBAC 154",
+    },
+  
+    posicaoEsperaIFR: {
+      id: "posicaoEsperaIFR",
+      assunto: "Posição de espera IFR",
+      tipoComparacao: "QUALITATIVO",
+      exigeValorNumerico: false,
+      parametro:
+        "Posições de espera corretamente identificadas.",
+      criterioTecnico:
+        "Falhas podem gerar incursão em pista.",
+      comoInspecionar:
+        "Verificar pintura, placas e visibilidade.",
+      logicaConformidade:
+        "Avaliação qualitativa da posição de espera.",
+      criticidade: "ALTA",
+      origem: "RBAC 154",
+    },
+  
+    geometriaTaxiway: {
+      id: "geometriaTaxiway",
+      assunto: "Geometria e fillet da taxiway",
+      tipoComparacao: "QUALITATIVO",
+      exigeValorNumerico: false,
+      parametro:
+        "Curvas compatíveis com a aeronave crítica.",
+      criterioTecnico:
+        "Curvas inadequadas podem causar saída de pavimento.",
+      comoInspecionar:
+        "Verificar marcas de pneu e desgaste lateral.",
+      logicaConformidade:
+        "Avaliação qualitativa da geometria.",
+      criticidade: "ALTA",
+      origem: "RBAC 154",
+    },
+  
+    cercaOperacional: {
+      id: "cercaOperacional",
+      assunto: "Cerca operacional",
+      tipoComparacao: "QUALITATIVO",
+      exigeValorNumerico: false,
+      parametro:
+        "Cerca operacional contínua e íntegra.",
+      criterioTecnico:
+        "A cerca protege áreas operacionais.",
+      comoInspecionar:
+        "Verificar continuidade, brechas e integridade.",
+      logicaConformidade:
+        "Avaliação qualitativa da cerca operacional.",
+      criticidade: "ALTA",
+      origem: "RBAC 107",
+    },
+  
+    cercaOperacionalAltura: {
+      id: "cercaOperacionalAltura",
+      assunto: "Altura da cerca operacional",
+      tipoComparacao: "MINIMO",
+      valorLimite: 2.4,
+      unidade: "m",
+      exigeValorNumerico: true,
+      parametro:
+        "Altura mínima operacional recomendada: 2,40 m.",
+      criterioTecnico:
+        "Alturas inferiores facilitam invasões.",
+      comoInspecionar:
+        "Medir altura da cerca operacional.",
+      logicaConformidade:
+        "CONFORME quando >= 2,40 m.",
+      criticidade: "CRÍTICA",
+      origem: "AVSEC",
     },
   
     cercaPatrimonial: {
       id: "cercaPatrimonial",
-      assunto: "Cerca patrimonial / sítio aeroportuário",
+      assunto: "Cerca patrimonial",
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "A cerca patrimonial deve delimitar o sítio aeroportuário, proteger a área de propriedade do aeroporto e reduzir risco de invasões, acessos indevidos e interferências externas.",
+        "Perímetro patrimonial protegido.",
       criterioTecnico:
-        "A cerca patrimonial protege o perímetro do aeroporto como bem patrimonial, podendo estar afastada da área operacional. Não substitui necessariamente a cerca operacional do lado ar.",
+        "Proteção patrimonial do sítio aeroportuário.",
       comoInspecionar:
-        "Verificar continuidade do perímetro, estado físico, pontos vulneráveis, erosões sob a cerca, acesso irregular, portões, placas, iluminação, interface com vias públicas e ocupações vizinhas.",
+        "Verificar perímetro e vulnerabilidades.",
       logicaConformidade:
-        "Avaliação qualitativa de integridade patrimonial e vulnerabilidades externas.",
+        "Avaliação qualitativa da cerca patrimonial.",
       criticidade: "MÉDIA",
-      origem: "RBAC 107 / apoio Manual ITA",
+      origem: "RBAC 107",
+    },
+  
+    cercaPatrimonialAltura: {
+      id: "cercaPatrimonialAltura",
+      assunto: "Altura da cerca patrimonial",
+      tipoComparacao: "MINIMO",
+      valorLimite: 1.8,
+      unidade: "m",
+      exigeValorNumerico: true,
+      parametro:
+        "Altura patrimonial recomendada mínima: 1,80 m.",
+      criterioTecnico:
+        "Alturas inferiores aumentam vulnerabilidade.",
+      comoInspecionar:
+        "Medir altura da cerca patrimonial.",
+      logicaConformidade:
+        "CONFORME quando >= 1,80 m.",
+      criticidade: "MÉDIA",
+      origem: "AVSEC",
     },
   
     controleAcesso: {
       id: "controleAcesso",
-      assunto: "Controle de acesso ao lado ar",
+      assunto: "Controle de acesso",
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "O acesso ao lado ar e áreas restritas deve ser controlado, autorizado, monitorado e compatível com os procedimentos AVSEC do operador aeroportuário.",
+        "Acessos ao lado ar controlados.",
       criterioTecnico:
-        "Falhas de controle de acesso podem permitir interferência ilícita, incursões, entrada de animais, veículos ou pessoas não autorizadas.",
+        "Controle AVSEC compatível com a operação.",
       comoInspecionar:
-        "Verificar portões, guaritas, credenciais, registros de acesso, barreiras físicas, câmeras, iluminação, rotinas de vigilância, integridade de cadeados e segregação entre lado terra e lado ar.",
+        "Verificar portões, guaritas e credenciais.",
       logicaConformidade:
-        "Avaliação qualitativa de controle de acesso e proteção AVSEC.",
-      criticidade: "ALTA",
+        "Avaliação qualitativa do controle AVSEC.",
+      criticidade: "CRÍTICA",
       origem: "RBAC 107",
     },
   
     areaRestrita: {
       id: "areaRestrita",
-      assunto: "Área restrita / área interditada",
+      assunto: "Área restrita",
       tipoComparacao: "QUALITATIVO",
       exigeValorNumerico: false,
       parametro:
-        "Áreas restritas, interditadas ou fora de serviço devem estar sinalizadas, segregadas, controladas e coerentes com a condição operacional declarada.",
+        "Áreas restritas corretamente sinalizadas.",
       criterioTecnico:
-        "Áreas mal sinalizadas podem gerar incursões, uso indevido, risco a aeronaves, veículos e equipes operacionais.",
+        "Áreas mal segregadas aumentam risco operacional.",
       comoInspecionar:
-        "Verificar NOTAM, cones, barreiras, pintura, isolamento físico, placas, comunicação operacional, coerência documental e evidências em campo.",
+        "Verificar placas, barreiras e isolamento.",
       logicaConformidade:
-        "Avaliação qualitativa de segregação, sinalização e coerência operacional.",
+        "Avaliação qualitativa da segregação.",
       criticidade: "ALTA",
-      origem: "RBAC 153 / RBAC 107",
+      origem: "RBAC 107 / RBAC 153",
     },
   };
   

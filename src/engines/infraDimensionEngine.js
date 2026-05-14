@@ -52,41 +52,82 @@ import {
   
       origemTecnica: k.origem,
   
-      tipoComparacao:
-        k.tipoComparacao || "QUALITATIVO",
+      tipoComparacao: k.tipoComparacao || "QUALITATIVO",
   
-      valorLimite:
-        k.valorLimite || null,
+      valorLimite: k.valorLimite || null,
   
-      unidade:
-        k.unidade || "",
+      unidade: k.unidade || "",
   
-      exigeValorNumerico:
-        k.exigeValorNumerico || false,
+      exigeValorNumerico: k.exigeValorNumerico || false,
   
-      logicaConformidade:
-        k.logicaConformidade || "",
+      logicaConformidade: k.logicaConformidade || "",
     };
   }
   
   function detectarAssunto(texto) {
-    if (possui(texto, ["borracha", "zona de toque", "atrito"])) {
-      return "borrachaZonaToque";
+    // =====================================================
+    // CERCA OPERACIONAL - ALTURA
+    // =====================================================
+  
+    if (
+      possui(texto, [
+        "altura da cerca operacional",
+        "altura cerca operacional",
+        "altura do alambrado operacional",
+      ])
+    ) {
+      return "cercaOperacionalAltura";
     }
   
-    if (possui(texto, ["vegetacao", "grama", "capim", "mato", "altura"])) {
-      return "vegetacao";
+    // =====================================================
+    // CERCA PATRIMONIAL - ALTURA
+    // =====================================================
+  
+    if (
+      possui(texto, [
+        "altura da cerca patrimonial",
+        "altura cerca patrimonial",
+        "altura do alambrado patrimonial",
+      ])
+    ) {
+      return "cercaPatrimonialAltura";
     }
+  
+    // =====================================================
+    // CONTROLE DE ACESSO
+    // =====================================================
+  
+    if (
+      possui(texto, [
+        "controle de acesso",
+        "controle avsec",
+        "portao",
+        "portoes",
+        "guarita",
+        "credencial",
+        "acesso ao lado ar",
+      ])
+    ) {
+      return "controleAcesso";
+    }
+  
+    // =====================================================
+    // CERCA OPERACIONAL
+    // =====================================================
   
     if (
       possui(texto, [
         "cerca operacional",
         "lado ar",
-        "area operacional",
+        "perimetro operacional",
       ])
     ) {
       return "cercaOperacional";
     }
+  
+    // =====================================================
+    // CERCA PATRIMONIAL
+    // =====================================================
   
     if (
       possui(texto, [
@@ -98,17 +139,39 @@ import {
       return "cercaPatrimonial";
     }
   
+    // =====================================================
+    // VEGETAÇÃO
+    // =====================================================
+  
     if (
       possui(texto, [
-        "controle de acesso",
-        "portao",
-        "credencial",
-        "guarita",
-        "avsec",
+        "vegetacao",
+        "grama",
+        "capim",
+        "mato",
+        "arbusto",
       ])
     ) {
-      return "controleAcesso";
+      return "vegetacao";
     }
+  
+    // =====================================================
+    // BORRACHA / ATRITO
+    // =====================================================
+  
+    if (
+      possui(texto, [
+        "borracha",
+        "zona de toque",
+        "atrito",
+      ])
+    ) {
+      return "borrachaZonaToque";
+    }
+  
+    // =====================================================
+    // ÁREA RESTRITA
+    // =====================================================
   
     if (
       possui(texto, [
@@ -121,6 +184,77 @@ import {
       return "areaRestrita";
     }
   
+    // =====================================================
+    // TAXIWAY - POSIÇÃO DE ESPERA IFR
+    // =====================================================
+  
+    if (
+      possui(texto, [
+        "posicao de espera",
+        "holding point",
+        "holding position",
+        "espera ifr",
+      ])
+    ) {
+      return "posicaoEsperaIFR";
+    }
+  
+    // =====================================================
+    // TAXIWAY - GEOMETRIA / FILLET
+    // =====================================================
+  
+    if (
+      possui(texto, [
+        "fillet",
+        "geometria da taxiway",
+        "curva da taxiway",
+        "curvas da taxiway",
+        "aeronave critica",
+      ])
+    ) {
+      return "geometriaTaxiway";
+    }
+  
+    // =====================================================
+    // TAXIWAY - OBSTÁCULOS
+    // =====================================================
+  
+    if (
+      texto.includes("taxiway") &&
+      possui(texto, [
+        "obstaculo",
+        "obstaculos",
+        "objeto",
+        "veiculo",
+        "equipamento",
+        "interferencia",
+      ])
+    ) {
+      return "obstaculosTaxiway";
+    }
+  
+    // =====================================================
+    // TAXIWAY - DRENAGEM
+    // =====================================================
+  
+    if (
+      texto.includes("taxiway") &&
+      possui(texto, [
+        "drenagem",
+        "agua",
+        "empoçamento",
+        "erosao",
+        "vala",
+        "canaleta",
+      ])
+    ) {
+      return "drenagemTaxiway";
+    }
+  
+    // =====================================================
+    // FOD
+    // =====================================================
+  
     if (
       possui(texto, [
         "fod",
@@ -132,6 +266,10 @@ import {
       return "fod";
     }
   
+    // =====================================================
+    // SINALIZAÇÃO LUMINOSA
+    // =====================================================
+  
     if (
       possui(texto, [
         "sinalizacao luminosa",
@@ -142,6 +280,10 @@ import {
     ) {
       return "sinalizacaoLuminosa";
     }
+  
+    // =====================================================
+    // SINALIZAÇÃO HORIZONTAL
+    // =====================================================
   
     if (
       possui(texto, [
@@ -155,6 +297,10 @@ import {
       return "sinalizacaoHorizontal";
     }
   
+    // =====================================================
+    // DRENAGEM
+    // =====================================================
+  
     if (
       possui(texto, [
         "drenagem",
@@ -166,9 +312,15 @@ import {
       ])
     ) {
       if (texto.includes("resa")) return "drenagemResa";
+  
       if (texto.includes("faixa")) return "drenagemFaixa";
+  
       return "drenagemPista";
     }
+  
+    // =====================================================
+    // OBSTÁCULOS
+    // =====================================================
   
     if (
       possui(texto, [
@@ -181,8 +333,13 @@ import {
       ])
     ) {
       if (texto.includes("resa")) return "obstaculosResa";
+  
       if (texto.includes("faixa")) return "obstaculosFaixa";
     }
+  
+    // =====================================================
+    // SUPERFÍCIE
+    // =====================================================
   
     if (
       possui(texto, [
@@ -196,8 +353,13 @@ import {
       ])
     ) {
       if (texto.includes("resa")) return "superficieResa";
+  
       if (texto.includes("faixa")) return "superficieFaixa";
     }
+  
+    // =====================================================
+    // PAVIMENTO
+    // =====================================================
   
     if (
       possui(texto, [
@@ -234,16 +396,12 @@ import {
     ]);
   }
   
-  export function gerarParametroInfraPorItem(
-    item = {},
-    config = {}
-  ) {
+  export function gerarParametroInfraPorItem(item = {}, config = {}) {
     const texto = textoCompleto(item);
   
     const assunto = detectarAssunto(texto);
   
-    const conhecimento =
-      respostaBaseConhecimento(assunto);
+    const conhecimento = respostaBaseConhecimento(assunto);
   
     if (conhecimento) {
       return conhecimento;
@@ -258,8 +416,7 @@ import {
         texto.includes("infra-resa-002")
       ) {
         return {
-          parametroEsperado:
-            p.dimensaoCompleta,
+          parametroEsperado: p.dimensaoCompleta,
   
           criterioTecnico: `
   Comprimento mínimo esperado:
@@ -267,20 +424,16 @@ import {
   
   Largura mínima esperada:
   ${p.larguraEsperada}
-  
-  Este item trata da existência, aplicabilidade ou dimensão da RESA.
   `,
   
           comoInspecionar:
-            "Confirmar existência da RESA, medir ou validar comprimento e largura disponíveis.",
+            "Confirmar existência da RESA e medir dimensões.",
   
-          tipoComparacao:
-            "DIMENSIONAL",
+          tipoComparacao: "DIMENSIONAL",
   
           exigeValorNumerico: true,
   
-          valorLimite:
-            p.comprimentoEsperado,
+          valorLimite: p.comprimentoEsperado,
   
           unidade: "m",
         };
@@ -288,48 +441,38 @@ import {
   
       return {
         parametroEsperado:
-          "RESA operacionalmente disponível, livre de interferências críticas.",
+          "RESA operacionalmente segura.",
   
-        criterioTecnico:
-          p.criterio,
+        criterioTecnico: p.criterio,
   
-        comoInspecionar:
-          p.comoInspecionar,
+        comoInspecionar: p.comoInspecionar,
   
-        tipoComparacao:
-          "QUALITATIVO",
+        tipoComparacao: "QUALITATIVO",
   
         exigeValorNumerico: false,
       };
     }
   
     if (texto.includes("faixa preparada")) {
-      const p =
-        obterParametroFaixaPreparada(config);
+      const p = obterParametroFaixaPreparada(config);
   
       if (ehDimensional(texto)) {
         return {
-          parametroEsperado:
-            p.larguraEsperada,
+          parametroEsperado: p.larguraEsperada,
   
           criterioTecnico:
-            "A largura da faixa preparada deve ser compatível com o código de referência.",
+            "Largura compatível com o código de referência.",
   
           comoInspecionar:
-            "Medir ou validar a largura preparada.",
+            "Medir largura da faixa preparada.",
   
-          tipoComparacao:
-            "MINIMO",
+          tipoComparacao: "MINIMO",
   
           exigeValorNumerico: true,
   
-          valorLimite:
-            Number(
-              String(p.larguraEsperada).replace(
-                /[^\d]/g,
-                ""
-              )
-            ),
+          valorLimite: Number(
+            String(p.larguraEsperada).replace(/[^\d]/g, "")
+          ),
   
           unidade: "m",
         };
@@ -337,16 +480,13 @@ import {
   
       return {
         parametroEsperado:
-          "Faixa preparada em condição operacional adequada.",
+          "Faixa preparada operacionalmente segura.",
   
-        criterioTecnico:
-          p.criterio,
+        criterioTecnico: p.criterio,
   
-        comoInspecionar:
-          p.comoInspecionar,
+        comoInspecionar: p.comoInspecionar,
   
-        tipoComparacao:
-          "QUALITATIVO",
+        tipoComparacao: "QUALITATIVO",
   
         exigeValorNumerico: false,
       };
@@ -357,32 +497,25 @@ import {
       texto.includes("runway strip") ||
       texto.includes("infra-fxa")
     ) {
-      const p =
-        obterParametroFaixaPista(config);
+      const p = obterParametroFaixaPista(config);
   
       if (ehDimensional(texto)) {
         return {
-          parametroEsperado:
-            p.larguraEsperada,
+          parametroEsperado: p.larguraEsperada,
   
           criterioTecnico:
-            "A largura da faixa de pista deve ser compatível com o código de referência.",
+            "Largura da faixa compatível com o código.",
   
           comoInspecionar:
-            "Medir ou validar largura total da faixa.",
+            "Medir largura total da faixa.",
   
-          tipoComparacao:
-            "MINIMO",
+          tipoComparacao: "MINIMO",
   
           exigeValorNumerico: true,
   
-          valorLimite:
-            Number(
-              String(p.larguraEsperada).replace(
-                /[^\d]/g,
-                ""
-              )
-            ),
+          valorLimite: Number(
+            String(p.larguraEsperada).replace(/[^\d]/g, "")
+          ),
   
           unidade: "m",
         };
@@ -390,16 +523,13 @@ import {
   
       return {
         parametroEsperado:
-          "Faixa de pista em condição operacional segura.",
+          "Faixa operacionalmente segura.",
   
-        criterioTecnico:
-          p.criterio,
+        criterioTecnico: p.criterio,
   
-        comoInspecionar:
-          p.comoInspecionar,
+        comoInspecionar: p.comoInspecionar,
   
-        tipoComparacao:
-          "QUALITATIVO",
+        tipoComparacao: "QUALITATIVO",
   
         exigeValorNumerico: false,
       };
@@ -409,32 +539,25 @@ import {
       texto.includes("taxiway") ||
       texto.includes("pista de taxi")
     ) {
-      const p =
-        obterParametroTaxiway(config);
+      const p = obterParametroTaxiway(config);
   
       if (ehDimensional(texto)) {
         return {
-          parametroEsperado:
-            p.larguraEsperada,
+          parametroEsperado: p.larguraEsperada,
   
           criterioTecnico:
-            "A largura da taxiway deve ser compatível com a aeronave crítica.",
+            "Largura compatível com aeronave crítica.",
   
           comoInspecionar:
-            "Medir ou validar largura e afastamentos.",
+            "Medir largura e afastamentos.",
   
-          tipoComparacao:
-            "MINIMO",
+          tipoComparacao: "MINIMO",
   
           exigeValorNumerico: true,
   
-          valorLimite:
-            Number(
-              String(p.larguraEsperada).replace(
-                /[^\d.]/g,
-                ""
-              )
-            ),
+          valorLimite: Number(
+            String(p.larguraEsperada).replace(/[^\d.]/g, "")
+          ),
   
           unidade: "m",
         };
@@ -442,16 +565,13 @@ import {
   
       return {
         parametroEsperado:
-          "Taxiway em condição operacional segura.",
+          "Taxiway operacionalmente segura.",
   
-        criterioTecnico:
-          p.criterio,
+        criterioTecnico: p.criterio,
   
-        comoInspecionar:
-          p.comoInspecionar,
+        comoInspecionar: p.comoInspecionar,
   
-        tipoComparacao:
-          "QUALITATIVO",
+        tipoComparacao: "QUALITATIVO",
   
         exigeValorNumerico: false,
       };
@@ -462,32 +582,25 @@ import {
       texto.includes("infra-pst") ||
       texto.includes("largura da pista")
     ) {
-      const p =
-        obterParametroPista(config);
+      const p = obterParametroPista(config);
   
       if (ehDimensional(texto)) {
         return {
-          parametroEsperado:
-            p.larguraEsperada,
+          parametroEsperado: p.larguraEsperada,
   
           criterioTecnico:
-            "A largura da pista deve ser compatível com o código de referência.",
+            "Largura da pista compatível com o código.",
   
           comoInspecionar:
-            "Medir ou validar largura operacional da pista.",
+            "Medir largura operacional da pista.",
   
-          tipoComparacao:
-            "MINIMO",
+          tipoComparacao: "MINIMO",
   
           exigeValorNumerico: true,
   
-          valorLimite:
-            Number(
-              String(p.larguraEsperada).replace(
-                /[^\d]/g,
-                ""
-              )
-            ),
+          valorLimite: Number(
+            String(p.larguraEsperada).replace(/[^\d]/g, "")
+          ),
   
           unidade: "m",
         };
@@ -495,16 +608,13 @@ import {
   
       return {
         parametroEsperado:
-          "Pista em condição operacional segura.",
+          "Pista operacionalmente segura.",
   
-        criterioTecnico:
-          p.criterio,
+        criterioTecnico: p.criterio,
   
-        comoInspecionar:
-          p.comoInspecionar,
+        comoInspecionar: p.comoInspecionar,
   
-        tipoComparacao:
-          "QUALITATIVO",
+        tipoComparacao: "QUALITATIVO",
   
         exigeValorNumerico: false,
       };
@@ -516,57 +626,39 @@ import {
         "Avaliar conforme operação aprovada.",
   
       criterioTecnico:
-        item.criterio ||
-        "Verificar conformidade técnica.",
+        item.criterio || "Verificar conformidade técnica.",
   
       comoInspecionar:
-        item.comoInspecionar ||
-        "Realizar inspeção visual.",
+        item.comoInspecionar || "Realizar inspeção visual.",
   
-      tipoComparacao:
-        "QUALITATIVO",
+      tipoComparacao: "QUALITATIVO",
   
       exigeValorNumerico: false,
     };
   }
   
-  export function enriquecerItensInfra(
-    itens = [],
-    config = {}
-  ) {
+  export function enriquecerItensInfra(itens = [], config = {}) {
     return itens.map((item) => {
-      const parametros =
-        gerarParametroInfraPorItem(
-          item,
-          config
-        );
+      const parametros = gerarParametroInfraPorItem(item, config);
   
       return {
         ...item,
   
-        parametroEsperado:
-          parametros.parametroEsperado,
+        parametroEsperado: parametros.parametroEsperado,
   
-        criterioTecnico:
-          parametros.criterioTecnico,
+        criterioTecnico: parametros.criterioTecnico,
   
-        comoInspecionar:
-          parametros.comoInspecionar,
+        comoInspecionar: parametros.comoInspecionar,
   
-        tipoComparacao:
-          parametros.tipoComparacao,
+        tipoComparacao: parametros.tipoComparacao,
   
-        valorLimite:
-          parametros.valorLimite,
+        valorLimite: parametros.valorLimite,
   
-        unidade:
-          parametros.unidade,
+        unidade: parametros.unidade,
   
-        exigeValorNumerico:
-          parametros.exigeValorNumerico,
+        exigeValorNumerico: parametros.exigeValorNumerico,
   
-        logicaConformidade:
-          parametros.logicaConformidade,
+        logicaConformidade: parametros.logicaConformidade,
       };
     });
   }

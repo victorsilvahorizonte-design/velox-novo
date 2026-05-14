@@ -4,14 +4,22 @@ import { INFRA_RESA } from "./resa";
 import { INFRA_TAXIWAY } from "./taxiway";
 import { INFRA_SINALIZACAO } from "./sinalizacao";
 import { INFRA_DRENAGEM } from "./drenagem";
+import { INFRA_SEGURANCA_PERIMETRAL } from "./segurancaPerimetral";
 
 export const INFRA_CHECKLIST = [
   ...INFRA_PISTA,
+
   ...INFRA_FAIXA,
+
   ...INFRA_RESA,
+
   ...INFRA_TAXIWAY,
+
   ...INFRA_SINALIZACAO,
+
   ...INFRA_DRENAGEM,
+
+  ...INFRA_SEGURANCA_PERIMETRAL,
 ];
 
 export default INFRA_CHECKLIST;
