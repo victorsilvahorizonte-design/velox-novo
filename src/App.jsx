@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 import logoVelox from "./assets/logo-velox.png";
+import logoVeloxRelatorio from "./assets/logo-velox-relatorio-branca.png";
 
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -23,6 +24,7 @@ import {
 } from "./services/anacService";
 
 import { buscarAerodromoConsolidado } from "./data/aerodromosConsolidados";
+import { buscarPANPorICAO } from "./data/pan/panData";
 
 import {
   atualizarUsuarioFirebase,
@@ -47,7 +49,8 @@ const STATUS = [
   "NÃO APLICÁVEL",
 ];
 
-const NORMAS_IDS = ["RBAC153", "RBAC154", "RBAC107", "INFRA"];
+const NORMAS_IDS = ["RBAC153", "RBAC154", "RBAC107", "INFRA", "VCP"];
+const NORMAS_GERAIS_RELATORIO_IDS = ["RBAC153", "RBAC154", "RBAC107", "INFRA"];
 
 const STORAGE_KEYS = {
   usuarios: "velox_usuarios",
@@ -110,6 +113,11 @@ const CONFIG_INICIAL = {
   codigoReferenciaRBAC154: "1B",
   tipoOperacao: "VFR",
   operacaoNoturna: false,
+  aeronaveCritica: "",
+  horarioFuncionamento: "",
+  aeroportoCertificado: "",
+  representantesAeroporto: "",
+  itensEspecificosVCP: "",
   internacional: false,
   possuiPista: true,
   possuiTaxiway: true,
@@ -232,6 +240,11 @@ function montarConfigDoConsolidado(aero) {
     categoriaRBAC107: aero.categoriaRBAC107 || aero.classeRBAC107 || "AP-0",
     comprimentoPista: Number(aero.comprimentoPista || 0),
     larguraPista: Number(aero.larguraPista || 0),
+    aeronaveCritica: aero.aeronaveCritica || aero.aeronaveCriticaOperacional || "",
+    horarioFuncionamento: aero.horarioFuncionamento || "",
+    aeroportoCertificado: aero.aeroportoCertificado || "",
+    representantesAeroporto: aero.representantesAeroporto || "",
+    itensEspecificosVCP: aero.itensEspecificosVCP || "",
     codigoNumero,
     codigoLetra,
     codigoReferenciaRBAC154:
@@ -394,6 +407,11 @@ function normalizarAerodromoBruto(aero, codigoDigitado) {
     categoriaRBAC107: classeRBAC107 || "AP-0",
     comprimentoPista,
     larguraPista,
+    aeronaveCritica: aeronaveCritica || "",
+    horarioFuncionamento: "",
+    aeroportoCertificado: "",
+    representantesAeroporto: "",
+    itensEspecificosVCP: "",
     codigoNumero,
     codigoLetra,
     codigoReferenciaRBAC154: `${codigoNumero}${codigoLetra}`,
@@ -450,8 +468,22 @@ function corStatus(status) {
   return "C9A300";
 }
 
+function hexParaRgb(hex) {
+  const limpo = String(hex || "000000").replace("#", "");
+  const numero = parseInt(limpo, 16);
+  return [
+    (numero >> 16) & 255,
+    (numero >> 8) & 255,
+    numero & 255,
+  ];
+}
+
 
 function verificarAplicabilidadePorNorma(normaId, item, configAerodromo) {
+  if (normaId === "VCP") {
+    return true;
+  }
+
   if (normaId === "INFRA") {
     return verificarAplicabilidadeInfra(item, configAerodromo);
   }
@@ -472,6 +504,325 @@ function criarSnapshotAeroporto(configAerodromo) {
     categoria107: configAerodromo.categoriaRBAC107 || "AP-0",
   };
 }
+
+
+function sanitizarValorFirebase(valor) {
+  if (valor === undefined) return null;
+  if (valor === null) return null;
+
+  if (typeof valor === "string" || typeof valor === "number" || typeof valor === "boolean") {
+    return valor;
+  }
+
+  if (valor instanceof Date) {
+    return valor.toISOString();
+  }
+
+  if (Array.isArray(valor)) {
+    return valor.map((item) => sanitizarValorFirebase(item)).filter((item) => item !== undefined);
+  }
+
+  if (typeof valor === "object") {
+    const limpo = {};
+    Object.entries(valor).forEach(([chave, conteudo]) => {
+      if (typeof conteudo === "function") return;
+      const sanitizado = sanitizarValorFirebase(conteudo);
+      if (sanitizado !== undefined) limpo[chave] = sanitizado;
+    });
+    return limpo;
+  }
+
+  return String(valor);
+}
+
+function sanitizarObjetoFirebase(objeto) {
+  return sanitizarValorFirebase(objeto);
+}
+
+function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
+  const lista = [];
+
+  NORMAS_IDS.forEach((normaId) => {
+    const respostasNorma = respostasOriginais?.[normaId] || {};
+
+    Object.entries(respostasNorma).forEach(([chave, resposta]) => {
+      const respostaLeve = { ...(resposta || {}) };
+
+      // Fotos em base64/DataURL não devem ir para o Firestore:
+      // além de deixar o documento muito pesado, podem causar erro de entidade aninhada.
+      // A versão completa continua no estado/local do app durante a inspeção; futuramente
+      // as imagens devem ir para Firebase Storage.
+      if (Array.isArray(respostaLeve.evidenciasAnexadas)) {
+        respostaLeve.evidenciasAnexadas = respostaLeve.evidenciasAnexadas.map((ev) => ({
+          nome: ev?.nome || "",
+          tipo: ev?.tipo || "",
+          criadoEm: ev?.criadoEm || "",
+          responsavel: ev?.responsavel || "",
+          latitude: ev?.latitude ?? ev?.geolocalizacao?.latitude ?? null,
+          longitude: ev?.longitude ?? ev?.geolocalizacao?.longitude ?? null,
+          precisao: ev?.precisao ?? ev?.geolocalizacao?.precisao ?? null,
+          geolocalizacao: ev?.geolocalizacao
+            ? {
+                latitude: ev.geolocalizacao.latitude ?? null,
+                longitude: ev.geolocalizacao.longitude ?? null,
+                precisao: ev.geolocalizacao.precisao ?? null,
+                capturadoEm: ev.geolocalizacao.capturadoEm || ev?.criadoEm || "",
+              }
+            : null,
+          imagemSalvaOnline: false,
+        }));
+      }
+
+      lista.push({
+        normaId,
+        chave: String(chave),
+        resposta: sanitizarValorFirebase(respostaLeve),
+      });
+    });
+  });
+
+  return lista;
+}
+
+function reconstruirRespostasPorNorma(inspecao) {
+  if (inspecao?.respostasPorNorma && typeof inspecao.respostasPorNorma === "object") {
+    return { ...criarRespostasNormas(), ...inspecao.respostasPorNorma };
+  }
+
+  const reconstruido = criarRespostasNormas();
+  const lista = Array.isArray(inspecao?.respostasPorNormaLista)
+    ? inspecao.respostasPorNormaLista
+    : [];
+
+  lista.forEach((registro) => {
+    const normaId = registro?.normaId;
+    const chave = registro?.chave;
+    if (!normaId || !chave) return;
+    reconstruido[normaId] = {
+      ...(reconstruido[normaId] || {}),
+      [chave]: registro.resposta || {},
+    };
+  });
+
+  return reconstruido;
+}
+
+function prepararInspecaoParaFirebase(objeto) {
+  const limpo = sanitizarObjetoFirebase(objeto);
+
+  const normasResumo = {};
+  NORMAS_IDS.forEach((normaId) => {
+    const respostasNorma = objeto?.respostasPorNorma?.[normaId] || {};
+    const r = objeto?.normas?.[normaId] || {};
+    normasResumo[normaId] = {
+      status: r.status || "em_andamento",
+      percentualConcluido: Number(r.percentualConcluido || 0),
+      totalItens: Number(r.totalItens || 0),
+      totalRespostas: Object.keys(respostasNorma || {}).length,
+    };
+  });
+
+  // Firestore estava rejeitando objetos profundamente aninhados em "normas" e
+  // depois em "respostasPorNorma". Para salvar online com segurança, usamos:
+  // - normasResumo: resumo simples;
+  // - respostasPorNormaLista: lista plana, sem chaves com pontos e sem base64 das fotos.
+  delete limpo.normas;
+  delete limpo.respostasPorNorma;
+
+  limpo.normasResumo = normasResumo;
+  limpo.respostasPorNormaLista = criarRespostasLevesParaFirebase(objeto?.respostasPorNorma || {});
+
+  return limpo;
+}
+
+
+const vcpStyles = {
+  fichaBox: {
+    background: "rgba(255,255,255,0.96)",
+    color: "#0f172a",
+    borderRadius: 22,
+    padding: 22,
+    margin: "0 0 22px",
+    boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
+    border: "1px solid rgba(15, 23, 42, 0.10)",
+  },
+  tituloPrincipal: {
+    color: "#0b3b78",
+    fontSize: 24,
+    margin: "0 0 18px",
+    fontWeight: 900,
+  },
+  tabela: {
+    width: "100%",
+    borderCollapse: "collapse",
+    background: "#ffffff",
+    fontSize: 14,
+  },
+  subtitulo: {
+    background: "#2f3a40",
+    color: "#ffffff",
+    textAlign: "left",
+    padding: "6px 8px",
+    fontSize: 16,
+    fontWeight: 800,
+    border: "1px solid #2f3a40",
+  },
+  numero: {
+    width: 74,
+    fontWeight: 900,
+    padding: 8,
+    border: "1px solid #1f2933",
+    background: "#eef2f4",
+    color: "#000",
+    verticalAlign: "middle",
+  },
+  tema: {
+    width: "34%",
+    fontWeight: 900,
+    color: "#00a9a7",
+    padding: 8,
+    border: "1px solid #1f2933",
+    background: "#e7ecef",
+    verticalAlign: "middle",
+  },
+  valor: {
+    padding: 6,
+    border: "1px solid #1f2933",
+    background: "#ffffff",
+    verticalAlign: "middle",
+  },
+  campoInput: {
+    width: "100%",
+    minHeight: 34,
+    border: "1px solid #d1d5db",
+    borderRadius: 8,
+    padding: "8px 10px",
+    color: "#111827",
+    background: "#ffffff",
+    fontWeight: 700,
+  },
+  campoTexto: {
+    width: "100%",
+    border: "1px solid #d1d5db",
+    borderRadius: 8,
+    padding: "8px 10px",
+    color: "#111827",
+    background: "#ffffff",
+    fontWeight: 700,
+    resize: "vertical",
+  },
+  panBox: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 14,
+    background: "#eef8ff",
+    border: "1px solid #bfdbfe",
+    color: "#0f172a",
+    lineHeight: 1.5,
+  },
+  cardOperacional: {
+    background: "rgba(255,255,255,0.96)",
+    color: "#111827",
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 18,
+    border: "1px solid rgba(15,23,42,0.15)",
+    boxShadow: "0 14px 34px rgba(0,0,0,0.16)",
+  },
+  cardCabecalho: {
+    display: "grid",
+    gridTemplateColumns: "110px minmax(240px, 1fr) minmax(320px, 1.25fr)",
+    gap: 0,
+    background: "#2f3a40",
+    color: "#fff",
+    fontWeight: 900,
+    padding: "8px 10px",
+  },
+  cardConteudo: {
+    display: "grid",
+    gridTemplateColumns: "110px minmax(240px, 1fr) minmax(320px, 1.25fr)",
+    gap: 0,
+    borderTop: "1px solid #111827",
+  },
+  numeroGrande: {
+    padding: 18,
+    fontSize: 18,
+    fontWeight: 900,
+    background: "#eef2f4",
+    borderRight: "1px solid #111827",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  blocoPergunta: {
+    padding: 18,
+    borderRight: "1px solid #111827",
+    background: "#ffffff",
+  },
+  temaCard: {
+    display: "block",
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  perguntaCard: {
+    margin: "0 0 16px",
+    lineHeight: 1.45,
+  },
+  classificacaoBox: {
+    marginTop: 12,
+  },
+  quadradosLinha: {
+    display: "flex",
+    gap: 0,
+    marginTop: 8,
+  },
+  quadrado: {
+    width: 34,
+    height: 30,
+    border: "1px solid #111827",
+    background: "#ffffff",
+    cursor: "pointer",
+  },
+  quadradoAtivo: {
+    background: "#10b981",
+  },
+  escalaLinha: {
+    display: "flex",
+    justifyContent: "space-between",
+    maxWidth: 176,
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: 700,
+  },
+  referencia: {
+    display: "block",
+    marginTop: 14,
+    color: "#475569",
+    fontWeight: 700,
+  },
+  blocoCondicao: {
+    padding: 18,
+    background: "#ffffff",
+  },
+  labelVCP: {
+    display: "block",
+    marginTop: 12,
+    fontWeight: 900,
+    color: "#0f172a",
+  },
+  textareaVCP: {
+    width: "100%",
+    minHeight: 96,
+    marginTop: 6,
+    border: "1px solid #cbd5e1",
+    borderRadius: 12,
+    padding: 12,
+    background: "#f8fafc",
+    color: "#111827",
+    resize: "vertical",
+    lineHeight: 1.5,
+  },
+};
 
 export default function App() {
   const [normaSelecionada, setNormaSelecionada] = useState("RBAC153");
@@ -500,6 +851,15 @@ export default function App() {
   const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
 
   const respostas = respostasPorNorma[normaSelecionada] || {};
+
+  const panInfo = useMemo(
+    () => buscarPANPorICAO(configAerodromo.icao),
+    [configAerodromo.icao]
+  );
+
+  const codigoFaixaPANAtual = panInfo
+    ? `${configAerodromo.codigoReferenciaRBAC154 || "Código RBAC 154 não informado"} / ${panInfo.codigoFaixaPAN} / CAPEX ${panInfo.capexEstimadoFinal}`
+    : `${configAerodromo.codigoReferenciaRBAC154 || "Código RBAC 154 não informado"} / Faixa PAN não cadastrada para este ICAO`;
 
   useEffect(() => {
     const baseSalva = safeParse(localStorage.getItem(STORAGE_KEYS.baseANAC), []);
@@ -682,6 +1042,13 @@ export default function App() {
   function itensAplicaveisDaNorma(normaId) {
     const norma = NORMAS[normaId] || { itens: [] };
 
+    if (normaId === "VCP") {
+      return (norma.itens || []).filter((item) => {
+        const id = String(item.id || "");
+        return !id.startsWith("1.") && id !== "5.1";
+      });
+    }
+
     if (normaId === "INFRA") {
       return gerarChecklistInfra(norma.itens || [], configAerodromo).filter(
         (item) => item.aplicavel !== false
@@ -700,7 +1067,7 @@ export default function App() {
     if (!termo) return itensAplicaveis;
 
     return itensAplicaveis.filter((item) =>
-      [item.ref, item.id, item.subparte, item.item, item.descricao, item.criterio, item.evidencias, item.risco]
+      [item.ref, item.id, item.subparte, item.grupo, item.item, item.titulo, item.descricao, item.criterio, item.evidencias, item.risco, item.criticidade]
         .join(" ")
         .toLowerCase()
         .includes(termo)
@@ -822,6 +1189,297 @@ export default function App() {
     }));
   }
 
+  function atualizarIdentificacaoVCP(id, valor) {
+    setRespostasPorNorma((prev) => ({
+      ...prev,
+      VCP: {
+        ...(prev.VCP || {}),
+        [id]: {
+          ...(prev.VCP?.[id] || {}),
+          valorIdentificacao: valor,
+          status: "CONFORME",
+        },
+      },
+    }));
+  }
+
+  function valorIdentificacaoVCP(id, fallback = "") {
+    const salvo = respostasPorNorma.VCP?.[id]?.valorIdentificacao;
+    if (salvo !== undefined && salvo !== null && salvo !== "") return salvo;
+    return fallback || "";
+  }
+
+  function aplicarClassificacaoVCP(item, nota) {
+    const statusAutomatico = Number(nota) <= 2 ? "NÃO CONFORME" : "CONFORME";
+    const chave = item.id || item.ref;
+
+    setRespostasPorNorma((prev) => ({
+      ...prev,
+      VCP: {
+        ...(prev.VCP || {}),
+        [chave]: {
+          ...(prev.VCP?.[chave] || {}),
+          classificacaoVCP: nota,
+          status: statusAutomatico,
+          responsavel: prev.VCP?.[chave]?.responsavel || usuarioLogado?.nomeCompleto || "",
+        },
+      },
+    }));
+  }
+
+  function renderFichaIdentificacaoVCP() {
+    const linha = (id, titulo, valor, tipo = "input", extraStyle = {}) => (
+      <tr key={id}>
+        <td style={vcpStyles.numero}>{id}</td>
+        <td style={vcpStyles.tema}>{titulo}</td>
+        <td style={vcpStyles.valor}>
+          {tipo === "textarea" ? (
+            <textarea
+              value={valorIdentificacaoVCP(id, valor)}
+              onChange={(e) => atualizarIdentificacaoVCP(id, e.target.value)}
+              style={{ ...vcpStyles.campoTexto, minHeight: extraStyle.minHeight || 54 }}
+              placeholder="Preenchimento manual"
+            />
+          ) : tipo === "select" ? (
+            <select
+              value={valorIdentificacaoVCP(id, valor)}
+              onChange={(e) => atualizarIdentificacaoVCP(id, e.target.value)}
+              style={vcpStyles.campoInput}
+            >
+              <option value="">Selecionar</option>
+              <option value="SIM">SIM</option>
+              <option value="NÃO">NÃO</option>
+            </select>
+          ) : (
+            <input
+              value={valorIdentificacaoVCP(id, valor)}
+              onChange={(e) => atualizarIdentificacaoVCP(id, e.target.value)}
+              style={vcpStyles.campoInput}
+              placeholder="Preenchimento manual"
+            />
+          )}
+        </td>
+      </tr>
+    );
+
+    return (
+      <section style={vcpStyles.fichaBox}>
+        <h2 style={vcpStyles.tituloPrincipal}>1&nbsp;&nbsp; Identificação do Aeroporto</h2>
+
+        <table style={vcpStyles.tabela}>
+          <tbody>
+            <tr><th colSpan="3" style={vcpStyles.subtitulo}>1.1 Informações Gerais</th></tr>
+            {linha("1.1.1", "Aeroporto", configAerodromo.nomeAerodromo || "")}
+            {linha("1.1.2", "Cidade/Estado", `${configAerodromo.municipio || ""}${configAerodromo.uf ? ` - ${configAerodromo.uf}` : ""}`)}
+            {linha("1.1.3", "Data", new Date().toLocaleDateString("pt-BR"))}
+            {linha("1.1.4", "Equipe da visita", usuarioLogado?.nomeCompleto || "", "textarea")}
+            {linha("1.1.5", "Representantes dos aeroportos (incluindo cargos)", configAerodromo.representantesAeroporto || "", "textarea")}
+          </tbody>
+        </table>
+
+        <table style={{ ...vcpStyles.tabela, marginTop: 22 }}>
+          <tbody>
+            <tr><th colSpan="3" style={vcpStyles.subtitulo}>1.2 Informações Específicas</th></tr>
+            {linha("1.2.1", "Tipo de operação (geral/comercial)", `${configAerodromo.tipoOperacao || ""}${configAerodromo.operacaoNoturna ? " / Noturna" : ""}`)}
+            {linha("1.2.2", "Código / Faixa PAN", codigoFaixaPANAtual, "textarea")}
+            {linha("1.2.3", "PPD (comprimento x largura)", `${configAerodromo.comprimentoPista || ""} m x ${configAerodromo.larguraPista || ""} m`)}
+            {linha("1.2.4", "Aeronave crítica", configAerodromo.aeronaveCritica || "")}
+            {linha("1.2.6", "Horário de funcionamento do aeroporto", configAerodromo.horarioFuncionamento || "")}
+            {linha("1.2.7", "Aeroporto certificado?", configAerodromo.aeroportoCertificado || "", "select")}
+            {linha("1.2.8", "Itens específicos", configAerodromo.itensEspecificosVCP || "", "textarea", { minHeight: 86 })}
+          </tbody>
+        </table>
+
+        {panInfo && (
+          <div style={vcpStyles.panBox}>
+            <strong>Base oficial PAN:</strong> {panInfo.prioridadePAN} • {panInfo.faixaPAN} • CAPEX {panInfo.capexEstimadoFinal}
+            <br />
+            <span>{panInfo.infraestruturaAlvo}</span>
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  function renderCardVCP(item, index) {
+    const chave = item.id || item.ref || `VCP-${index}`;
+    const resposta = respostasPorNorma.VCP?.[chave] || {};
+    const nota = Number(resposta.classificacaoVCP || 0);
+    const statusAtual = resposta.status || "NÃO VERIFICADO";
+    const itemSemClassificacao = String(item.id || "") === "4.7";
+
+    return (
+      <article key={chave} style={vcpStyles.cardOperacional}>
+        <div style={vcpStyles.cardCabecalho}>
+          <span>Nº do item</span>
+          <span>Tema</span>
+          <span>Condição atual</span>
+        </div>
+
+        <div style={vcpStyles.cardConteudo}>
+          <div style={vcpStyles.numeroGrande}>{item.id}</div>
+          <div style={vcpStyles.blocoPergunta}>
+            <strong style={vcpStyles.temaCard}>{item.titulo || item.item}</strong>
+            <p style={vcpStyles.perguntaCard}>{item.descricao}</p>
+
+            {!itemSemClassificacao && (
+              <div style={vcpStyles.classificacaoBox}>
+                <strong>Classificação:</strong>
+                <div style={vcpStyles.quadradosLinha}>
+                  {[1, 2, 3, 4, 5].map((valor) => (
+                    <button
+                      key={valor}
+                      type="button"
+                      onClick={() => aplicarClassificacaoVCP(item, valor)}
+                      style={{
+                        ...vcpStyles.quadrado,
+                        ...(nota >= valor ? vcpStyles.quadradoAtivo : {}),
+                      }}
+                      title={`Classificação ${valor}`}
+                    />
+                  ))}
+                </div>
+                <div style={vcpStyles.escalaLinha}>
+                  <span>Ruim</span>
+                  <span>Ótimo</span>
+                </div>
+              </div>
+            )}
+
+            {itemSemClassificacao && (
+              <div style={vcpStyles.panBox}>
+                <strong>Registro livre de achados:</strong><br />
+                Use este item para registrar riscos, pontos críticos, oportunidades de melhoria ou fatos relevantes que não apareceram nas perguntas anteriores.
+              </div>
+            )}
+
+            {item.referenciaNormativa?.length > 0 && (
+              <small style={vcpStyles.referencia}>Referência de apoio: {item.referenciaNormativa.join(" • ")}</small>
+            )}
+          </div>
+
+          <div style={vcpStyles.blocoCondicao}>
+            <span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span>
+
+            {itemSemClassificacao && (
+              <div className="status-row" style={{ marginTop: 10, marginBottom: 10 }}>
+                {["NÃO VERIFICADO", "CONFORME", "NÃO CONFORME"].map((status) => {
+                  const ativo = statusAtual === status;
+                  const classe = classeStatus(status);
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      className={ativo ? `status-btn ${classe} active` : `status-btn ${classe}`}
+                      onClick={() => atualizarResposta(item, "status", status)}
+                    >
+                      {status}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <label style={vcpStyles.labelVCP}>
+              Condição atual
+              <textarea
+                value={resposta.condicaoAtual || ""}
+                onChange={(e) => atualizarResposta(item, "condicaoAtual", e.target.value)}
+                placeholder={itemSemClassificacao ? "Descreva o item identificado, risco, oportunidade, achado relevante ou ponto crítico observado na visita." : "Descreva a condição atual observada em campo. Ex.: cerca íntegra, trechos danificados, ausência de barreira, pavimento com trincas..."}
+                style={vcpStyles.textareaVCP}
+              />
+            </label>
+
+            <div className="evidencias-box" style={{ marginTop: 10 }}>
+              <strong>Fotos da condição atual</strong>
+              <p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p>
+              <label className="upload-evidencia">
+                Tirar foto ou anexar imagem
+                <input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} />
+              </label>
+              {resposta.evidenciasAnexadas?.length > 0 && (
+                <div className="preview-evidencias">
+                  {resposta.evidenciasAnexadas.map((ev, indexEv) => (
+                    <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
+                      <img src={ev.data} alt={ev.nome} />
+                      {ev.latitude && ev.longitude && (
+                        <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
+                      )}
+                      <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <label style={vcpStyles.labelVCP}>
+              Observação
+              <textarea
+                value={resposta.obs || ""}
+                onChange={(e) => atualizarResposta(item, "obs", e.target.value)}
+                placeholder="Campo complementar técnico, recomendações, pendências e comentários da visita."
+                style={vcpStyles.textareaVCP}
+              />
+            </label>
+
+            <div className="grid field-grid" style={{ marginTop: 10 }}>
+              <div className="col-6">
+                <label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label>
+              </div>
+              <div className="col-6">
+                <label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  function renderFinalizacaoVCP() {
+    const itemFinal = { id: "VCP-FINALIZACAO" };
+    const resposta = respostasPorNorma.VCP?.[itemFinal.id] || {};
+
+    return (
+      <section style={vcpStyles.fichaBox}>
+        <h2 style={vcpStyles.tituloPrincipal}>Finalização do Relatório VCP</h2>
+        <div className="grid field-grid">
+          <div className="col-6">
+            <label style={vcpStyles.labelVCP}>
+              Responsável pela visita
+              <input
+                value={resposta.responsavelVisita || usuarioLogado?.nomeCompleto || ""}
+                onChange={(e) => atualizarResposta(itemFinal, "responsavelVisita", e.target.value)}
+                placeholder="Responsável pela visita"
+              />
+            </label>
+          </div>
+          <div className="col-6">
+            <label style={vcpStyles.labelVCP}>
+              Participantes adicionais
+              <input
+                value={resposta.participantesAdicionais || ""}
+                onChange={(e) => atualizarResposta(itemFinal, "participantesAdicionais", e.target.value)}
+                placeholder="Ex.: representante do aeroporto, operador, equipe técnica..."
+              />
+            </label>
+          </div>
+          <div className="col-12">
+            <label style={vcpStyles.labelVCP}>
+              Observações finais da visita
+              <textarea
+                value={resposta.obsFinal || ""}
+                onChange={(e) => atualizarResposta(itemFinal, "obsFinal", e.target.value)}
+                placeholder="Registre observações finais, encaminhamentos e pontos de atenção para o relatório."
+                style={vcpStyles.textareaVCP}
+              />
+            </label>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function atualizarCampoConfig(campo, valor) {
     setConfigAerodromo((prev) => {
       const novo = { ...prev, [campo]: valor };
@@ -847,9 +1505,55 @@ export default function App() {
     });
   }
 
-  function adicionarEvidencias(item, arquivos) {
+  async function capturarGeolocalizacaoEvidencia() {
+    if (!navigator.geolocation) {
+      return {
+        disponivel: false,
+        mensagem: "Geolocalização não suportada pelo navegador.",
+        criadoEm: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const posicao = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 0,
+        });
+      });
+
+      const latitude = Number(posicao.coords.latitude);
+      const longitude = Number(posicao.coords.longitude);
+      const precisao = Number(posicao.coords.accuracy || 0);
+
+      return {
+        disponivel: true,
+        latitude,
+        longitude,
+        precisao,
+        altitude: posicao.coords.altitude ?? null,
+        capturadoEm: new Date(posicao.timestamp || Date.now()).toISOString(),
+        linkMaps: `https://www.google.com/maps?q=${latitude},${longitude}`,
+      };
+    } catch (erro) {
+      return {
+        disponivel: false,
+        mensagem:
+          erro?.code === 1
+            ? "Localização não autorizada pelo usuário."
+            : "Não foi possível obter a localização no momento da foto.",
+        criadoEm: new Date().toISOString(),
+      };
+    }
+  }
+
+  async function adicionarEvidencias(item, arquivos) {
     const chave = item.id || item.ref;
     const listaArquivos = Array.from(arquivos || []);
+    if (!listaArquivos.length) return;
+
+    const geolocalizacao = await capturarGeolocalizacaoEvidencia();
 
     listaArquivos.forEach((arquivo) => {
       const leitor = new FileReader();
@@ -858,6 +1562,7 @@ export default function App() {
         setRespostasPorNorma((prev) => {
           const respostasNorma = prev[normaSelecionada] || {};
           const evidenciasAtuais = respostasNorma[chave]?.evidenciasAnexadas || [];
+          const agora = new Date().toISOString();
 
           return {
             ...prev,
@@ -871,7 +1576,15 @@ export default function App() {
                     nome: arquivo.name,
                     tipo: arquivo.type,
                     data: leitor.result,
-                    criadoEm: new Date().toISOString(),
+                    criadoEm: agora,
+                    capturadoEm: agora,
+                    responsavel: usuarioLogado?.nomeCompleto || "",
+                    itemVinculado: chave,
+                    geolocalizacao,
+                    latitude: geolocalizacao?.latitude ?? null,
+                    longitude: geolocalizacao?.longitude ?? null,
+                    precisaoGPS: geolocalizacao?.precisao ?? null,
+                    linkMaps: geolocalizacao?.linkMaps || "",
                   },
                 ],
               },
@@ -947,7 +1660,7 @@ export default function App() {
       porNorma: {},
     };
 
-    NORMAS_IDS.forEach((normaId) => {
+    NORMAS_GERAIS_RELATORIO_IDS.forEach((normaId) => {
       const respostasNorma = respostasPorNorma[normaId] || {};
       const itens = itensInspecionadosParaRelatorio(normaId);
 
@@ -987,7 +1700,7 @@ export default function App() {
 
   function montarEvidencias(todasNormas = true) {
     const lista = [];
-    const normasParaLer = todasNormas ? NORMAS_IDS : [normaSelecionada];
+    const normasParaLer = todasNormas ? NORMAS_GERAIS_RELATORIO_IDS : [normaSelecionada];
 
     normasParaLer.forEach((normaId) => {
       const norma = NORMAS[normaId] || { itens: [] };
@@ -1006,9 +1719,11 @@ export default function App() {
             normaId,
             normaNome: norma.nome || normaId,
             itemId: chave,
-            itemTitulo: item.item || item.descricao || "Item de inspeção",
+            itemTitulo: item.item || item.titulo || item.descricao || "Item de inspeção",
             requisito: item.criterio || "",
             observacao: resposta.obs || "",
+            condicaoAtual: resposta.condicaoAtual || "",
+            classificacaoVCP: resposta.classificacaoVCP || "",
             status,
             imagem,
           });
@@ -1069,7 +1784,7 @@ export default function App() {
       return [objeto, ...prev];
     });
 
-    salvarInspecaoFirebase(objeto).catch((erro) => {
+    salvarInspecaoFirebase(prepararInspecaoParaFirebase(objeto)).catch((erro) => {
       console.error(erro);
       alert(`Erro ao salvar inspeção online: ${mensagemErroFirebase(erro)}`);
     });
@@ -1106,7 +1821,7 @@ export default function App() {
     setInspecaoAtualId(inspecao.id);
     setConfigAerodromo({ ...CONFIG_INICIAL, ...(inspecao.configAerodromo || {}) });
     setIcao(inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "");
-    setRespostasPorNorma({ ...criarRespostasNormas(), ...(inspecao.respostasPorNorma || {}) });
+    setRespostasPorNorma(reconstruirRespostasPorNorma(inspecao));
     setNormaSelecionada("RBAC153");
     setMensagemBase(`Inspeção aberta: ${inspecao.aeroporto?.nome || "Aeródromo"}.`);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1126,7 +1841,7 @@ export default function App() {
       },
     };
     setInspecoes((prev) => [copia, ...prev]);
-    salvarInspecaoFirebase(copia).catch((erro) => {
+    salvarInspecaoFirebase(prepararInspecaoParaFirebase(copia)).catch((erro) => {
       console.error(erro);
       alert(`Erro ao duplicar inspeção online: ${mensagemErroFirebase(erro)}`);
     });
@@ -1152,6 +1867,54 @@ export default function App() {
       alert(`Erro ao excluir inspeções online: ${mensagemErroFirebase(erro)}`);
     });
     limparInspecaoAtual();
+  }
+
+  async function limparTodasInspecoesSistemaAdminMaster() {
+    if (!ehAdminMaster(usuarioLogado)) {
+      alert("Somente o Admin Master pode limpar todas as inspeções do sistema.");
+      return;
+    }
+
+    if (!inspecoes.length) {
+      alert("Não há inspeções salvas para excluir.");
+      return;
+    }
+
+    const primeiraConfirmacao = window.confirm(
+      `ATENÇÃO: você está prestes a excluir TODAS as ${inspecoes.length} inspeções salvas de TODOS os usuários.\n\nUsuários, cadastros e Admin Master serão preservados. Deseja continuar?`
+    );
+
+    if (!primeiraConfirmacao) return;
+
+    const textoConfirmacao = window.prompt(
+      "Para confirmar a limpeza total das inspeções, digite exatamente: LIMPAR SISTEMA"
+    );
+
+    if (String(textoConfirmacao || "").trim().toUpperCase() !== "LIMPAR SISTEMA") {
+      alert("Confirmação inválida. Nenhuma inspeção foi apagada.");
+      return;
+    }
+
+    try {
+      setMensagemBase("Limpando todas as inspeções do sistema...");
+
+      await Promise.all(
+        inspecoes
+          .filter((insp) => insp?.id)
+          .map((insp) => excluirInspecaoFirebase(insp.id))
+      );
+
+      setInspecoes([]);
+      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify([]));
+      setInspecaoAtualId(null);
+      setRespostasPorNorma(criarRespostasNormas());
+      setMensagemBase("Limpeza total concluída. Todas as inspeções foram excluídas. Usuários preservados.");
+      alert("Limpeza total concluída. Todas as inspeções foram excluídas do sistema.");
+    } catch (erro) {
+      console.error(erro);
+      alert(`Erro ao limpar todas as inspeções: ${mensagemErroFirebase(erro)}`);
+      setMensagemBase("Falha ao limpar todas as inspeções. Verifique o console e tente novamente.");
+    }
   }
 
   async function fazerCadastro(e) {
@@ -1359,7 +2122,560 @@ export default function App() {
     });
   }
 
+
+  function obterItensVCPParaRelatorio() {
+    return itensAplicaveisDaNorma("VCP");
+  }
+
+  function obterRespostaVCP(item) {
+    const chave = item.id || item.ref;
+    return respostasPorNorma.VCP?.[chave] || {};
+  }
+
+  function obterIdentificacaoVCPParaRelatorio() {
+    return [
+      ["Aeroporto", valorIdentificacaoVCP("1.1.1", configAerodromo.nomeAerodromo || "")],
+      ["Cidade/Estado", valorIdentificacaoVCP("1.1.2", `${configAerodromo.municipio || ""}${configAerodromo.uf ? ` - ${configAerodromo.uf}` : ""}`)],
+      ["Data", valorIdentificacaoVCP("1.1.3", new Date().toLocaleDateString("pt-BR"))],
+      ["Equipe da visita", valorIdentificacaoVCP("1.1.4", usuarioLogado?.nomeCompleto || "")],
+      ["Representantes dos aeroportos", valorIdentificacaoVCP("1.1.5", configAerodromo.representantesAeroporto || "")],
+      ["Tipo de operação", valorIdentificacaoVCP("1.2.1", `${configAerodromo.tipoOperacao || ""}${configAerodromo.operacaoNoturna ? " / Noturna" : ""}`)],
+      ["Código / Faixa PAN", valorIdentificacaoVCP("1.2.2", codigoFaixaPANAtual)],
+      ["PPD (comprimento x largura)", valorIdentificacaoVCP("1.2.3", `${configAerodromo.comprimentoPista || ""} m x ${configAerodromo.larguraPista || ""} m`)],
+      ["Aeronave crítica", valorIdentificacaoVCP("1.2.4", configAerodromo.aeronaveCritica || "")],
+      ["Horário de funcionamento", valorIdentificacaoVCP("1.2.6", configAerodromo.horarioFuncionamento || "")],
+      ["Aeroporto certificado?", valorIdentificacaoVCP("1.2.7", configAerodromo.aeroportoCertificado || "")],
+      ["Itens específicos", valorIdentificacaoVCP("1.2.8", configAerodromo.itensEspecificosVCP || "")],
+    ];
+  }
+
+  function montarEvidenciasVCP() {
+    const lista = [];
+    obterItensVCPParaRelatorio().forEach((item) => {
+      const chave = item.id || item.ref;
+      const resposta = respostasPorNorma.VCP?.[chave] || {};
+      (resposta.evidenciasAnexadas || []).forEach((imagem) => {
+        lista.push({
+          id: gerarIdEvidencia(lista.length),
+          normaId: "VCP",
+          normaNome: "VCP",
+          itemId: chave,
+          itemTitulo: item.titulo || item.item || item.descricao || "Item VCP",
+          descricao: item.descricao || "",
+          observacao: resposta.obs || "",
+          condicaoAtual: resposta.condicaoAtual || "",
+          classificacaoVCP: resposta.classificacaoVCP || "",
+          status: resposta.status || "NÃO VERIFICADO",
+          imagem,
+          geolocalizacao: imagem.geolocalizacao || null,
+          latitude: imagem.latitude ?? imagem.geolocalizacao?.latitude ?? null,
+          longitude: imagem.longitude ?? imagem.geolocalizacao?.longitude ?? null,
+          precisaoGPS: imagem.precisaoGPS ?? imagem.geolocalizacao?.precisao ?? null,
+          linkMaps: imagem.linkMaps || imagem.geolocalizacao?.linkMaps || "",
+          capturadoEm: imagem.capturadoEm || imagem.criadoEm || "",
+          responsavel: imagem.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
+        });
+      });
+    });
+    return lista;
+  }
+
+  async function exportarExcelVCP() {
+    try {
+      setGerandoRelatorio(true);
+      // Não salva automaticamente durante a geração do XLS VCP.
+      // Isso evita re-renderização pesada/Firestore durante o download do relatório.
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Velox Service";
+      workbook.created = new Date();
+
+      const logoBase64 = await urlParaBase64(logoVeloxRelatorio);
+      const logoId = workbook.addImage({ base64: logoBase64, extension: extensaoImagem(logoBase64) });
+      const itensVCP = obterItensVCPParaRelatorio();
+      const evidencias = montarEvidenciasVCP();
+
+      const wsIdentificacao = workbook.addWorksheet("Identificação VCP", {
+        pageSetup: { paperSize: 9, orientation: "portrait" },
+        headerFooter: { oddHeader: "&CRelatório VCP - Velox Service", oddFooter: "&LVELOX SERVICE&R&P de &N" },
+      });
+      wsIdentificacao.columns = [{ width: 34 }, { width: 90 }];
+      wsIdentificacao.addImage(logoId, { tl: { col: 0.2, row: 0.2 }, ext: { width: 230, height: 63 } });
+      wsIdentificacao.mergeCells("A5:B5");
+      wsIdentificacao.getCell("A5").value = "RELATÓRIO DE INSPEÇÃO / VERIFICAÇÃO — VCP";
+      wsIdentificacao.getCell("A5").font = { bold: true, size: 18, color: { argb: "FFFFFFFF" } };
+      wsIdentificacao.getCell("A5").alignment = { horizontal: "center" };
+      wsIdentificacao.getCell("A5").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF129446" } };
+
+      obterIdentificacaoVCPParaRelatorio().forEach(([campo, valor], index) => {
+        const row = wsIdentificacao.getRow(index + 7);
+        row.values = [campo, valor || "—"];
+        row.getCell(1).font = { bold: true, color: { argb: "FF0F172A" } };
+        row.eachCell((cell) => {
+          cell.alignment = { vertical: "top", wrapText: true };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD1D5DB" } },
+            left: { style: "thin", color: { argb: "FFD1D5DB" } },
+            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+            right: { style: "thin", color: { argb: "FFD1D5DB" } },
+          };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: index % 2 === 0 ? "FFF8FAFC" : "FFFFFFFF" } };
+        });
+      });
+
+      if (panInfo) {
+        const baseRow = wsIdentificacao.getRow(22);
+        baseRow.values = ["Base PAN", `${panInfo.prioridadePAN} • ${panInfo.faixaPAN} • CAPEX ${panInfo.capexEstimadoFinal}`];
+        wsIdentificacao.getRow(23).values = ["Infraestrutura alvo", panInfo.infraestruturaAlvo || "—"];
+      }
+
+      const finalizacao = respostasPorNorma.VCP?.["VCP-FINALIZACAO"] || {};
+      wsIdentificacao.getRow(25).values = ["Responsável pela visita", finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "—"];
+      wsIdentificacao.getRow(26).values = ["Participantes adicionais", finalizacao.participantesAdicionais || "—"];
+      wsIdentificacao.getRow(27).values = ["Observações finais", finalizacao.obsFinal || "—"];
+
+      const wsCards = workbook.addWorksheet("Cards VCP", { views: [{ state: "frozen", ySplit: 1 }] });
+      wsCards.columns = [
+        { header: "Nº do item", key: "id", width: 14 },
+        { header: "Tema", key: "tema", width: 34 },
+        { header: "Pergunta / Verificação", key: "descricao", width: 58 },
+        { header: "Condição atual", key: "condicaoAtual", width: 48 },
+        { header: "Observação", key: "obs", width: 44 },
+        { header: "Classificação", key: "classificacao", width: 16 },
+        { header: "Status", key: "status", width: 18 },
+        { header: "Responsável", key: "responsavel", width: 28 },
+        { header: "Prazo", key: "prazo", width: 18 },
+        { header: "Fotos vinculadas", key: "fotos", width: 24 },
+      ];
+      wsCards.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF129446" } };
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      });
+
+      itensVCP.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = obterRespostaVCP(item);
+        const fotos = evidencias.filter((ev) => ev.itemId === chave).map((ev) => ev.id).join(", ");
+        const itemSemClassificacao = String(item.id || "") === "4.7";
+        const status = resposta.status || "NÃO VERIFICADO";
+        const row = wsCards.addRow({
+          id: chave,
+          tema: item.titulo || item.item || "Item VCP",
+          descricao: item.descricao || "",
+          condicaoAtual: resposta.condicaoAtual || "",
+          obs: resposta.obs || "",
+          classificacao: itemSemClassificacao ? "Sem classificação" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—",
+          status,
+          responsavel: resposta.responsavel || usuarioLogado?.nomeCompleto || "",
+          prazo: resposta.prazo || "",
+          fotos: fotos || "Sem foto vinculada",
+        });
+        row.eachCell((cell) => {
+          cell.alignment = { vertical: "top", wrapText: true };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD1D5DB" } },
+            left: { style: "thin", color: { argb: "FFD1D5DB" } },
+            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+            right: { style: "thin", color: { argb: "FFD1D5DB" } },
+          };
+        });
+        row.getCell(7).font = { bold: true, color: { argb: "FFFFFFFF" } };
+        row.getCell(7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${corStatus(status)}` } };
+      });
+
+      const wsFotos = workbook.addWorksheet("Fotos VCP", { headerFooter: { oddHeader: "&CFotos VCP - Velox Service", oddFooter: "&LRegistro Fotográfico VCP&R&P de &N" } });
+      wsFotos.columns = [
+        { header: "ID Foto", key: "id", width: 16 },
+        { header: "Item", key: "itemId", width: 14 },
+        { header: "Tema", key: "itemTitulo", width: 42 },
+        { header: "Condição atual", key: "condicaoAtual", width: 48 },
+        { header: "Observação", key: "observacao", width: 42 },
+        { header: "Latitude", key: "latitude", width: 18 },
+        { header: "Longitude", key: "longitude", width: 18 },
+        { header: "Precisão GPS", key: "precisaoGPS", width: 16 },
+        { header: "Data/hora", key: "capturadoEm", width: 24 },
+        { header: "Responsável", key: "responsavel", width: 26 },
+        { header: "Link Google Maps", key: "linkMaps", width: 45 },
+        { header: "Foto", key: "foto", width: 34 },
+      ];
+      wsFotos.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF129446" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      });
+
+      evidencias.forEach((ev, index) => {
+        const rowIndex = index + 2;
+        const row = wsFotos.addRow({
+          id: ev.id,
+          itemId: ev.itemId,
+          itemTitulo: ev.itemTitulo,
+          condicaoAtual: ev.condicaoAtual,
+          observacao: ev.observacao,
+          latitude: ev.latitude ?? "",
+          longitude: ev.longitude ?? "",
+          precisaoGPS: ev.precisaoGPS ? `${Math.round(ev.precisaoGPS)} m` : "",
+          capturadoEm: dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm),
+          responsavel: ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "",
+          linkMaps: ev.linkMaps || ev.imagem?.linkMaps || "",
+          foto: "Imagem inserida ao lado",
+        });
+        row.height = 120;
+        row.eachCell((cell) => {
+          cell.alignment = { vertical: "top", wrapText: true };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD1D5DB" } },
+            left: { style: "thin", color: { argb: "FFD1D5DB" } },
+            bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+            right: { style: "thin", color: { argb: "FFD1D5DB" } },
+          };
+        });
+        try {
+          const imgId = workbook.addImage({ base64: ev.imagem.data, extension: extensaoImagem(ev.imagem.data) });
+          wsFotos.addImage(imgId, { tl: { col: 11.1, row: rowIndex - 0.9 }, ext: { width: 190, height: 110 } });
+        } catch (erro) {
+          console.error("Erro ao inserir foto VCP no Excel:", erro);
+        }
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(
+        new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+        `Relatorio_VCP_${configAerodromo.icao || "VELOX"}.xlsx`
+      );
+    } catch (erro) {
+      console.error(erro);
+      alert("Erro ao gerar Excel exclusivo VCP.");
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  }
+
+  async function exportarPDFVCP() {
+    try {
+      setGerandoRelatorio(true);
+      // Não salva automaticamente durante a geração do PDF VCP.
+      // O salvamento deve ser feito pelo botão de salvar inspeção, separando relatório e Firebase.
+
+      const doc = new jsPDF("p", "mm", "a4");
+      const largura = doc.internal.pageSize.getWidth();
+      const altura = doc.internal.pageSize.getHeight();
+      const logoBase64 = await urlParaBase64(logoVeloxRelatorio);
+      const itensVCP = obterItensVCPParaRelatorio();
+      const evidencias = montarEvidenciasVCP();
+      const finalizacao = respostasPorNorma.VCP?.["VCP-FINALIZACAO"] || {};
+
+      const CORES = {
+        grafite: [14, 17, 18],
+        grafite2: [28, 32, 34],
+        verde1: [18, 148, 70],
+        verde2: [87, 190, 51],
+        amareloVerde: [211, 211, 0],
+        texto: [15, 23, 42],
+        cinza: [75, 85, 99],
+        borda: [220, 225, 230],
+        fundo: [248, 250, 252],
+      };
+
+      function setRGB(rgb) {
+        doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+      }
+
+      function textoQuebrado(texto, x, y, maxWidth, lineHeight = 4.2) {
+        const linhas = doc.splitTextToSize(String(texto || "—"), maxWidth);
+        doc.text(linhas, x, y);
+        return y + linhas.length * lineHeight;
+      }
+
+      function desenharDegradeHorizontal(x, y, w, h) {
+        const passos = 32;
+        for (let i = 0; i < passos; i += 1) {
+          const t = i / (passos - 1);
+          const r = Math.round(CORES.verde1[0] * (1 - t) + CORES.amareloVerde[0] * t);
+          const g = Math.round(CORES.verde1[1] * (1 - t) + CORES.amareloVerde[1] * t);
+          const b = Math.round(CORES.verde1[2] * (1 - t) + CORES.amareloVerde[2] * t);
+          doc.setFillColor(r, g, b);
+          doc.rect(x + (w / passos) * i, y, w / passos + 0.5, h, "F");
+        }
+      }
+
+      function rodapeVCP(titulo = "") {
+        desenharDegradeHorizontal(0, altura - 15, largura, 15);
+        doc.setFillColor(17, 24, 28);
+        doc.rect(0, altura - 15, 70, 15, "F");
+        doc.setFontSize(7.6);
+        doc.setTextColor(255, 255, 255);
+        doc.text("VELOX SERVICE • Relatório VCP", 12, altura - 7);
+        doc.text(titulo, largura - 12, altura - 7, { align: "right" });
+      }
+
+      function cabecalhoVCP(titulo) {
+        desenharDegradeHorizontal(0, 0, largura, 24);
+        doc.addImage(logoBase64, "PNG", 9, 4.5, 54, 14.8);
+        doc.setFontSize(9.5);
+        doc.setTextColor(255, 255, 255);
+        doc.text(titulo, largura - 10, 14, { align: "right" });
+      }
+
+      function statusColor(status) {
+        if (status === "CONFORME") return [22, 163, 74];
+        if (status === "NÃO CONFORME") return [220, 38, 38];
+        if (status === "NÃO APLICÁVEL") return [100, 116, 139];
+        return [82, 90, 96];
+      }
+
+      function textoGeo(ev) {
+        const lat = ev.latitude ?? ev.imagem?.latitude ?? ev.imagem?.geolocalizacao?.latitude;
+        const lng = ev.longitude ?? ev.imagem?.longitude ?? ev.imagem?.geolocalizacao?.longitude;
+        const precisao = ev.precisaoGPS ?? ev.imagem?.precisaoGPS ?? ev.imagem?.geolocalizacao?.precisao;
+        if (lat === null || lat === undefined || lng === null || lng === undefined) {
+          return "Localização: não autorizada ou indisponível";
+        }
+        const p = precisao ? ` ± ${Math.round(precisao)} m` : "";
+        return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}${p}`;
+      }
+
+      // CAPA PREMIUM
+      setRGB(CORES.grafite);
+      doc.rect(0, 0, largura, altura, "F");
+      doc.setFillColor(24, 28, 30);
+      doc.rect(0, 0, largura * 0.58, altura, "F");
+      desenharDegradeHorizontal(largura * 0.58, 0, largura * 0.42, altura);
+      doc.setFillColor(255, 255, 255);
+      doc.triangle(114, 0, 124, 0, 96, altura, "F");
+      doc.addImage(logoBase64, "PNG", 18, 25, 92, 25.2);
+
+      doc.setFontSize(18);
+      doc.setTextColor(255, 255, 255);
+      doc.text("Relatório de", 18, 83);
+      doc.setFontSize(24);
+      doc.text("Inspeção / Verificação", 18, 96);
+      doc.setFontSize(34);
+      doc.text("VCP", 18, 113);
+      doc.setFontSize(12);
+      doc.setTextColor(142, 220, 72);
+      doc.text("Aeroportos Brasil Viracopos", 18, 126);
+      doc.setTextColor(255, 255, 255);
+      doc.text("• Checklist operacional exclusivo", 18, 134);
+      doc.setDrawColor(120, 210, 67);
+      doc.line(18, 151, 128, 151);
+
+      doc.setFontSize(10);
+      doc.setTextColor(210, 220, 225);
+      const capaDados = [
+        ["Aeródromo", configAerodromo.nomeAerodromo || "Não informado"],
+        ["ICAO", configAerodromo.icao || "Não informado"],
+        ["Município/UF", `${configAerodromo.municipio || "—"} / ${configAerodromo.uf || "—"}`],
+        ["Data", new Date().toLocaleDateString("pt-BR")],
+        ["Responsável", finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "Inspetor Velox"],
+      ];
+      let cy = 166;
+      capaDados.forEach(([label, valor]) => {
+        doc.setTextColor(142, 220, 72);
+        doc.text(`${label}:`, 18, cy);
+        doc.setTextColor(255, 255, 255);
+        doc.setFont(undefined, "bold");
+        doc.text(String(valor || "—"), 18, cy + 6);
+        doc.setFont(undefined, "normal");
+        cy += 17;
+      });
+      rodapeVCP("Capa");
+
+      // IDENTIFICAÇÃO
+      doc.addPage();
+      cabecalhoVCP("Identificação do Aeroporto");
+      doc.setFontSize(16);
+      doc.setTextColor(...CORES.texto);
+      doc.text("1  Identificação do Aeroporto", 14, 40);
+      let y = 54;
+      obterIdentificacaoVCPParaRelatorio().forEach(([campo, valor], index) => {
+        const linhasValor = doc.splitTextToSize(String(valor || "—"), 110);
+        const boxHeight = Math.max(10, linhasValor.length * 4.2 + 5);
+        if (y + boxHeight > 255) {
+          rodapeVCP("Identificação");
+          doc.addPage();
+          cabecalhoVCP("Identificação do Aeroporto");
+          y = 40;
+        }
+        doc.setDrawColor(...CORES.borda);
+        doc.setFillColor(index % 2 === 0 ? 248 : 255, index % 2 === 0 ? 250 : 255, index % 2 === 0 ? 252 : 255);
+        doc.roundedRect(14, y - 6, 182, boxHeight, 2, 2, "FD");
+        doc.setFontSize(8.2);
+        doc.setTextColor(28, 120, 50);
+        doc.setFont(undefined, "bold");
+        doc.text(campo, 18, y);
+        doc.setFont(undefined, "normal");
+        doc.setTextColor(...CORES.cinza);
+        doc.text(linhasValor, 78, y);
+        y += boxHeight + 2;
+      });
+      if (panInfo) {
+        y += 6;
+        doc.setDrawColor(195, 225, 195);
+        doc.setFillColor(244, 252, 244);
+        doc.roundedRect(14, y - 4, 182, 34, 3, 3, "FD");
+        doc.setFillColor(22, 148, 70);
+        doc.circle(28, y + 13, 9, "F");
+        doc.setFontSize(10);
+        doc.setTextColor(22, 101, 52);
+        doc.setFont(undefined, "bold");
+        doc.text("Base PAN", 44, y + 5);
+        doc.setFont(undefined, "normal");
+        doc.setTextColor(...CORES.cinza);
+        textoQuebrado(`${panInfo.prioridadePAN} • ${panInfo.faixaPAN} • CAPEX ${panInfo.capexEstimadoFinal}`, 44, y + 14, 140);
+        textoQuebrado(panInfo.infraestruturaAlvo || "—", 44, y + 23, 140);
+      }
+      rodapeVCP("Identificação");
+
+      // CARDS VCP
+      doc.addPage();
+      cabecalhoVCP("Cards VCP - Checklist Operacional");
+      y = 40;
+      itensVCP.forEach((item) => {
+        const chave = item.id || item.ref;
+        const resposta = obterRespostaVCP(item);
+        const status = resposta.status || "NÃO VERIFICADO";
+        const primeiraFoto = resposta.evidenciasAnexadas?.[0];
+        const itemSemClassificacao = String(item.id || "") === "4.7";
+
+        if (y > 232) {
+          rodapeVCP("Cards VCP");
+          doc.addPage();
+          cabecalhoVCP("Cards VCP - Checklist Operacional");
+          y = 38;
+        }
+
+        doc.setDrawColor(...CORES.borda);
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+        const sc = statusColor(status);
+        doc.setFillColor(sc[0], sc[1], sc[2]);
+        doc.roundedRect(18, y, 14, 12, 2, 2, "F");
+        doc.setFontSize(8.5);
+        doc.setTextColor(255, 255, 255);
+        doc.setFont(undefined, "bold");
+        doc.text(String(chave), 25, y + 8, { align: "center" });
+
+        doc.setTextColor(...CORES.texto);
+        doc.setFontSize(9.2);
+        doc.text(item.titulo || item.item || "Item VCP", 38, y + 4);
+        doc.setFont(undefined, "normal");
+        doc.setFontSize(7.3);
+        doc.setTextColor(...CORES.cinza);
+        doc.text(doc.splitTextToSize(item.descricao || "—", primeiraFoto ? 78 : 98), 38, y + 12);
+        doc.setFontSize(7.1);
+        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, primeiraFoto ? 78 : 98), 38, y + 32);
+        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, primeiraFoto ? 78 : 98), 38, y + 42);
+
+        doc.setFillColor(sc[0], sc[1], sc[2]);
+        doc.roundedRect(142, y, 38, 9, 2, 2, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(6.8);
+        doc.setFont(undefined, "bold");
+        doc.text(status, 161, y + 6, { align: "center" });
+        doc.setFont(undefined, "normal");
+        doc.setTextColor(...CORES.cinza);
+        doc.setFontSize(7.2);
+        doc.text("Classificação:", 151, y + 22, { align: "center" });
+        doc.setFontSize(13);
+        doc.setTextColor(sc[0], sc[1], sc[2]);
+        doc.setFont(undefined, "bold");
+        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", 161, y + 34, { align: "center" });
+        doc.setFont(undefined, "normal");
+
+        if (primeiraFoto?.data) {
+          try {
+            const formato = extensaoImagem(primeiraFoto.data) === "png" ? "PNG" : "JPEG";
+            doc.addImage(primeiraFoto.data, formato, 108, y + 15, 30, 30);
+          } catch (erro) {
+            console.error("Erro ao inserir foto VCP no PDF:", erro);
+          }
+        }
+        y += 64;
+      });
+      rodapeVCP("Cards VCP");
+
+      // FINALIZAÇÃO
+      doc.addPage();
+      cabecalhoVCP("Finalização VCP");
+      doc.setFontSize(16);
+      doc.setTextColor(...CORES.texto);
+      doc.text("Finalização do Relatório VCP", 14, 40);
+      doc.setFontSize(9);
+      doc.setTextColor(...CORES.cinza);
+      textoQuebrado(`Responsável pela visita: ${finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "—"}`, 14, 56, 176);
+      textoQuebrado(`Participantes adicionais: ${finalizacao.participantesAdicionais || "—"}`, 14, 70, 176);
+      textoQuebrado(`Observações finais: ${finalizacao.obsFinal || "—"}`, 14, 84, 176);
+      doc.setDrawColor(22, 148, 70);
+      doc.line(20, 245, 95, 245);
+      doc.line(115, 245, 190, 245);
+      doc.setFontSize(8);
+      doc.text("Responsável Velox", 57, 251, { align: "center" });
+      doc.text("Representante do Aeroporto", 152, 251, { align: "center" });
+      rodapeVCP("Finalização");
+
+      // FOTOS VINCULADAS
+      if (evidencias.length > 0) {
+        doc.addPage();
+        cabecalhoVCP("Fotos vinculadas aos cards");
+        doc.setFontSize(16);
+        doc.setTextColor(...CORES.texto);
+        doc.text("Fotos vinculadas aos cards", 14, 40);
+        y = 54;
+        evidencias.forEach((ev) => {
+          if (y > 222) {
+            rodapeVCP("Fotos vinculadas");
+            doc.addPage();
+            cabecalhoVCP("Fotos vinculadas aos cards");
+            y = 40;
+          }
+          doc.setDrawColor(...CORES.borda);
+          doc.setFillColor(...CORES.fundo);
+          doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+          doc.setFontSize(8.2);
+          doc.setTextColor(17, 83, 37);
+          doc.setFont(undefined, "bold");
+          doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 2);
+          doc.setFont(undefined, "normal");
+          doc.setFontSize(7.4);
+          doc.setTextColor(...CORES.cinza);
+          doc.text(doc.splitTextToSize(ev.itemTitulo, 90), 18, y + 11);
+          doc.text(doc.splitTextToSize(`Condição: ${ev.condicaoAtual || "—"}`, 90), 18, y + 24);
+          doc.text(dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm), 18, y + 36);
+          doc.text(textoGeo(ev), 18, y + 43);
+          doc.text(`Responsável: ${ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—"}`, 18, y + 50);
+          if (ev.linkMaps || ev.imagem?.linkMaps) {
+            doc.setTextColor(22, 148, 70);
+            doc.textWithLink("Ver no mapa", 93, y + 50, { url: ev.linkMaps || ev.imagem?.linkMaps });
+          }
+          try {
+            const formato = extensaoImagem(ev.imagem.data) === "png" ? "PNG" : "JPEG";
+            doc.addImage(ev.imagem.data, formato, 122, y - 1, 62, 46);
+          } catch (erro) {
+            console.error("Erro ao inserir imagem VCP no PDF:", erro);
+          }
+          y += 65;
+        });
+        rodapeVCP("Fotos vinculadas");
+      }
+
+      const pdfBlob = doc.output("blob");
+      saveAs(pdfBlob, `Relatorio_VCP_${configAerodromo.icao || "VELOX"}.pdf`);
+    } catch (erro) {
+      console.error(erro);
+      alert("Erro ao gerar PDF exclusivo VCP.");
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  }
+
   async function exportarExcelPremium() {
+    if (normaSelecionada === "VCP") {
+      await exportarExcelVCP();
+      return;
+    }
+
     try {
       setGerandoRelatorio(true);
       if (configAerodromo.icao || configAerodromo.nomeAerodromo) salvarInspecaoAtual();
@@ -1387,7 +2703,7 @@ export default function App() {
         },
       });
 
-      wsResumo.addImage(logoId, { tl: { col: 0.2, row: 0.2 }, ext: { width: 210, height: 75 } });
+      wsResumo.addImage(logoId, { tl: { col: 0.2, row: 0.2 }, ext: { width: 230, height: 63 } });
       wsResumo.mergeCells("A5:F5");
       wsResumo.getCell("A5").value = "RELATÓRIO COMPLETO DE INSPEÇÃO AEROPORTUÁRIA";
       wsResumo.getCell("A5").font = { bold: true, size: 18, color: { argb: "FFFFFFFF" } };
@@ -1437,11 +2753,12 @@ export default function App() {
         { header: "ID", key: "id", width: 18 },
         { header: "Descrição", key: "descricao", width: 48 },
         { header: "Requisito / Critério", key: "criterio", width: 48 },
+        { header: "Condição atual", key: "condicaoAtual", width: 46 },
         { header: "Observações", key: "obs", width: 42 },
         { header: "Status", key: "status", width: 20 },
         { header: "Responsável", key: "responsavel", width: 28 },
         { header: "Prazo", key: "prazo", width: 18 },
-        { header: "Evidências", key: "evidencias", width: 24 },
+        { header: "Fotos / Evidências", key: "evidencias", width: 24 },
       ];
 
       wsItens.getRow(1).eachCell((cell) => {
@@ -1464,8 +2781,9 @@ export default function App() {
           const row = wsItens.addRow({
             norma: norma.nome || normaId,
             id: chave,
-            descricao: item.item || item.descricao || "",
-            criterio: item.criterio || item.evidencias || "",
+            descricao: item.item || item.titulo || item.descricao || "",
+            criterio: item.criterio || item.descricao || item.evidencias || "",
+            condicaoAtual: resposta.condicaoAtual || resposta.valorEncontrado || "",
             obs: resposta.obs || "",
             status,
             responsavel: resposta.responsavel || usuarioLogado?.nomeCompleto || "",
@@ -1482,8 +2800,8 @@ export default function App() {
               right: { style: "thin", color: { argb: "FFD1D5DB" } },
             };
           });
-          row.getCell(6).font = { bold: true, color: { argb: "FFFFFFFF" } };
-          row.getCell(6).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${corStatus(status)}` } };
+          row.getCell(7).font = { bold: true, color: { argb: "FFFFFFFF" } };
+          row.getCell(7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${corStatus(status)}` } };
         });
       });
 
@@ -1551,6 +2869,11 @@ export default function App() {
   }
 
   async function exportarPDFPremium() {
+    if (normaSelecionada === "VCP") {
+      await exportarPDFVCP();
+      return;
+    }
+
     try {
       setGerandoRelatorio(true);
       if (configAerodromo.icao || configAerodromo.nomeAerodromo) salvarInspecaoAtual();
@@ -1580,7 +2903,7 @@ export default function App() {
       function cabecalho(titulo) {
         doc.setFillColor(6, 19, 11);
         doc.rect(0, 0, largura, 24, "F");
-        doc.addImage(logoBase64, "PNG", 10, 5, 42, 14);
+        doc.addImage(logoBase64, "PNG", 10, 5, 52, 14.2);
         doc.setFontSize(11);
         doc.setTextColor(255, 255, 255);
         doc.text(titulo, largura - 10, 14, { align: "right" });
@@ -1590,7 +2913,7 @@ export default function App() {
       doc.rect(0, 0, largura, altura, "F");
       doc.setFillColor(32, 196, 90);
       doc.rect(0, 0, 8, altura, "F");
-      doc.addImage(logoBase64, "PNG", 22, 24, 78, 28);
+      doc.addImage(logoBase64, "PNG", 22, 24, 90, 24.7);
       doc.setFontSize(24);
       doc.setTextColor(255, 255, 255);
       doc.text("Relatório Completo", 22, 82);
@@ -1649,7 +2972,7 @@ export default function App() {
 
       indicadores.forEach(([label, valor, cor], index) => {
         const x = 14 + index * 36;
-        doc.setFillColor(`#${cor}`);
+        doc.setFillColor(...hexParaRgb(cor));
         doc.roundedRect(x, y, 32, 24, 3, 3, "F");
         doc.setFontSize(13);
         doc.setTextColor(255, 255, 255);
@@ -1690,8 +3013,10 @@ export default function App() {
 
           if (!itemEntraNoRelatorio(status)) return;
 
-          const textoItem = item.item || item.descricao || "Item de inspeção";
+          const textoItem = item.item || item.titulo || item.descricao || "Item de inspeção";
+          const condicaoAtual = resposta.condicaoAtual || "-";
           const obs = resposta.obs || "-";
+          const primeiraFoto = resposta.evidenciasAnexadas?.[0];
 
           if (y > 250) {
             doc.addPage();
@@ -1701,25 +3026,76 @@ export default function App() {
 
           doc.setDrawColor(210, 215, 220);
           doc.setFillColor(248, 250, 252);
-          doc.roundedRect(14, y - 5, 182, 30, 2, 2, "FD");
-          doc.setFontSize(7.3);
-          doc.setTextColor(255, 255, 255);
-          doc.setFillColor(`#${corStatus(status)}`);
-          doc.roundedRect(16, y - 2, 34, 7, 2, 2, "F");
-          doc.text(status, 33, y + 3, { align: "center" });
-          doc.setTextColor(10, 31, 18);
-          doc.setFontSize(8.5);
-          doc.text(String(chave), 54, y + 3);
-          doc.setFontSize(8);
-          doc.setTextColor(45, 55, 65);
-          doc.text(doc.splitTextToSize(textoItem, 132), 16, y + 12);
-          doc.setFontSize(7.5);
-          doc.setTextColor(80, 90, 100);
-          doc.text(doc.splitTextToSize(`Obs.: ${obs}`, 168), 16, y + 23);
-          y += 36;
+
+          if (normaId === "VCP") {
+            doc.roundedRect(14, y - 5, 182, 58, 2, 2, "FD");
+            doc.setFontSize(7.3);
+            doc.setTextColor(255, 255, 255);
+            doc.setFillColor(...hexParaRgb(corStatus(status)));
+            doc.roundedRect(16, y - 2, 34, 7, 2, 2, "F");
+            doc.text(status, 33, y + 3, { align: "center" });
+            doc.setTextColor(10, 31, 18);
+            doc.setFontSize(8.5);
+            doc.text(`${String(chave)} • ${item.titulo || "Item VCP"}`, 54, y + 3);
+            doc.setFontSize(7.8);
+            doc.setTextColor(45, 55, 65);
+            doc.text(doc.splitTextToSize(item.descricao || textoItem, primeiraFoto ? 94 : 160), 16, y + 12);
+            doc.setFontSize(7.2);
+            doc.setTextColor(80, 90, 100);
+            if (String(item.id || "") !== "4.7") {
+              doc.text(doc.splitTextToSize(`Classificação: ${resposta.classificacaoVCP || "-"}/5`, 92), 16, y + 28);
+              doc.text(doc.splitTextToSize(`Condição atual: ${condicaoAtual}`, primeiraFoto ? 92 : 160), 16, y + 36);
+              doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 92 : 160), 16, y + 48);
+            } else {
+              doc.text(doc.splitTextToSize(`Condição atual: ${condicaoAtual}`, primeiraFoto ? 92 : 160), 16, y + 30);
+              doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 92 : 160), 16, y + 44);
+            }
+
+            if (primeiraFoto?.data) {
+              try {
+                const formato = extensaoImagem(primeiraFoto.data) === "png" ? "PNG" : "JPEG";
+                doc.addImage(primeiraFoto.data, formato, 124, y + 7, 58, 40);
+              } catch (erro) {
+                console.error("Erro ao inserir imagem do item VCP no PDF:", erro);
+              }
+            }
+            y += 64;
+          } else {
+            doc.roundedRect(14, y - 5, 182, 30, 2, 2, "FD");
+            doc.setFontSize(7.3);
+            doc.setTextColor(255, 255, 255);
+            doc.setFillColor(...hexParaRgb(corStatus(status)));
+            doc.roundedRect(16, y - 2, 34, 7, 2, 2, "F");
+            doc.text(status, 33, y + 3, { align: "center" });
+            doc.setTextColor(10, 31, 18);
+            doc.setFontSize(8.5);
+            doc.text(String(chave), 54, y + 3);
+            doc.setFontSize(8);
+            doc.setTextColor(45, 55, 65);
+            doc.text(doc.splitTextToSize(textoItem, 132), 16, y + 12);
+            doc.setFontSize(7.5);
+            doc.setTextColor(80, 90, 100);
+            doc.text(doc.splitTextToSize(`Obs.: ${obs}`, 168), 16, y + 23);
+            y += 36;
+          }
         });
         rodape(norma.nome || normaId);
       });
+
+      if (respostasPorNorma.VCP?.["VCP-FINALIZACAO"]) {
+        const finalizacao = respostasPorNorma.VCP["VCP-FINALIZACAO"];
+        doc.addPage();
+        cabecalho("Finalização VCP");
+        doc.setFontSize(16);
+        doc.setTextColor(10, 31, 18);
+        doc.text("Finalização do Relatório VCP", 14, 40);
+        doc.setFontSize(9);
+        doc.setTextColor(45, 55, 65);
+        doc.text(doc.splitTextToSize(`Responsável pela visita: ${finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "-"}`, 176), 14, 56);
+        doc.text(doc.splitTextToSize(`Participantes adicionais: ${finalizacao.participantesAdicionais || "-"}`, 176), 14, 68);
+        doc.text(doc.splitTextToSize(`Observações finais: ${finalizacao.obsFinal || "-"}`, 176), 14, 82);
+        rodape("Finalização VCP");
+      }
 
       doc.addPage();
       cabecalho("Evidências Fotográficas");
@@ -1939,6 +3315,23 @@ export default function App() {
               <div><b>{estatisticasAdmin.emAndamento}</b><span>Em andamento</span></div>
             </div>
 
+            {ehAdminMaster(usuarioLogado) && (
+              <div className="admin-danger-zone" style={{ marginTop: 18, padding: 16, borderRadius: 16, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)" }}>
+                <h3 style={{ margin: "0 0 6px", color: "#fecaca" }}>Zona crítica do Admin Master</h3>
+                <p style={{ margin: "0 0 12px", color: "#e5e7eb" }}>
+                  Exclui todas as inspeções salvas de todos os usuários. Usuários, cadastros, permissões e Admin Master serão preservados.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={limparTodasInspecoesSistemaAdminMaster}
+                  disabled={estatisticasAdmin.totalInspecoes === 0}
+                >
+                  ⚠ Limpar todas as inspeções do sistema
+                </button>
+              </div>
+            )}
+
             <div className="admin-users">
               {usuarios.map((usuario) => {
                 const totalDoUsuario = inspecoes.filter((insp) => insp.usuarioId === usuario.id).length;
@@ -2078,8 +3471,8 @@ export default function App() {
           </div>
 
           <div className="grid section-space">
-            <div className="col-6"><button className="btn btn-dark" onClick={exportarExcelPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar Excel Inspecionados"}</button></div>
-            <div className="col-6"><button className="btn btn-secondary" onClick={exportarPDFPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : "Exportar PDF Inspecionados"}</button></div>
+            <div className="col-6"><button className="btn btn-dark" onClick={exportarExcelPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : normaSelecionada === "VCP" ? "Exportar XLS VCP" : "Exportar Excel Inspecionados"}</button></div>
+            <div className="col-6"><button className="btn btn-secondary" onClick={exportarPDFPremium} disabled={gerandoRelatorio}>{gerandoRelatorio ? "Gerando relatório..." : normaSelecionada === "VCP" ? "Exportar PDF VCP" : "Exportar PDF Inspecionados"}</button></div>
           </div>
 
           <div className="search-box"><label>Buscar no checklist<input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar item, referência, critério, evidência ou risco..." /></label></div>
@@ -2205,6 +3598,49 @@ export default function App() {
         )}
 
 
+        {normaSelecionada === "VCP" && (
+          <section className="infra-panel">
+            <div className="infra-header">
+              <div>
+                <h2>Painel VCP / Visita Técnica</h2>
+                <p>
+                  Checklist operacional de visita técnica seguindo a sequência do documento:
+                  identificação automática/editável, lado ar, lado terra, red flags e assinaturas.
+                </p>
+              </div>
+              <span className="infra-badge">VCP</span>
+            </div>
+
+            <div className="infra-grid">
+              <div className="infra-card">
+                <h3>Aeroporto</h3>
+                <p>{configAerodromo.icao || "ICAO não informado"}</p>
+                <small>{configAerodromo.nomeAerodromo || "Carregue o aeroporto pelo código ICAO"}</small>
+              </div>
+
+              <div className="infra-card">
+                <h3>Código / Faixa PAN</h3>
+                <p>{panInfo ? panInfo.faixaPAN : "Não cadastrado"}</p>
+                <small>{panInfo ? `${panInfo.prioridadePAN} • CAPEX ${panInfo.capexEstimadoFinal}` : "Base PAN vinculada aos aeroportos do Edital AmpliAR/PAN"}</small>
+              </div>
+
+              <div className="infra-card">
+                <h3>Escopo</h3>
+                <p>Visita Técnica</p>
+                <small>Lado Ar • Lado Terra • Red Flags</small>
+              </div>
+
+              <div className="infra-card">
+                <h3>Relatório</h3>
+                <p>Premium Velox</p>
+                <small>Condição atual, fotos, classificação e observações por item</small>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {normaSelecionada === "VCP" && renderFichaIdentificacaoVCP()}
+
         <section>
           {itensVisiveis.length === 0 && <div className="card">Nenhum item aplicável encontrado para os parâmetros atuais.</div>}
 
@@ -2232,12 +3668,16 @@ export default function App() {
                   })
                 : null;
 
+            if (normaSelecionada === "VCP") {
+              return renderCardVCP(item, index);
+            }
+
             return (
               <article key={chave} className="checklist-item">
                 <div className="checklist-head"><span className="item-ref">{item.ref || item.id}</span><span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span></div>
-                <h3 className="item-title">{item.item || item.descricao || "Item de verificação"}</h3>
+                <h3 className="item-title">{item.item || item.titulo || item.descricao || "Item de verificação"}</h3>
                 {item.subparte && <p className="item-text"><strong>Subparte:</strong> {item.subparte}</p>}
-                {item.descricao && item.item && <p className="item-text">{item.descricao}</p>}
+                {item.descricao && (item.item || item.titulo) && <p className="item-text">{item.descricao}</p>}
                 {(item.criterioTecnicoCalculado || item.criterio) && (
                   <div className="item-text">
                     <strong>Critério:</strong>
@@ -2250,6 +3690,10 @@ export default function App() {
                 )}
                 {item.evidencias && <p className="item-text"><strong>Evidências esperadas:</strong> {item.evidencias}</p>}
                 {item.risco && <p className="item-text"><strong>Risco:</strong> {item.risco}</p>}
+                {normaSelecionada === "VCP" && item.grupo && <p className="item-text"><strong>Grupo:</strong> {item.grupo}</p>}
+                {normaSelecionada === "VCP" && item.criticidade && <p className="item-text"><strong>Criticidade:</strong> {item.criticidade}</p>}
+                {normaSelecionada === "VCP" && item.exigeFoto && <p className="item-text"><strong>Evidência:</strong> Foto obrigatória para este item.</p>}
+                {normaSelecionada === "VCP" && item.referenciaNormativa?.length > 0 && <p className="item-text"><strong>Referência de apoio:</strong> {item.referenciaNormativa.join(" • ")}</p>}
                 {normaSelecionada === "INFRA" && item.parametroEsperadoCalculado && (
                   <div className="item-text infra-parametro-item">
                     <strong>Parâmetro técnico calculado:</strong>
@@ -2387,6 +3831,8 @@ export default function App() {
             );
           })}
         </section>
+
+        {normaSelecionada === "VCP" && renderFinalizacaoVCP()}
       </main>
     </div>
   );
