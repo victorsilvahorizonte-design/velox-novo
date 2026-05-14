@@ -852,18 +852,18 @@ export default function App() {
   const [isMobileVCP, setIsMobileVCP] = useState(false);
 
   useEffect(() => {
-    const atualizarMobileVCP = () => {
+    const atualizarModoMobile = () => {
       if (typeof window === "undefined") return;
       setIsMobileVCP(window.innerWidth <= 768);
     };
 
-    atualizarMobileVCP();
-    window.addEventListener("resize", atualizarMobileVCP);
-    window.addEventListener("orientationchange", atualizarMobileVCP);
+    atualizarModoMobile();
+    window.addEventListener("resize", atualizarModoMobile);
+    window.addEventListener("orientationchange", atualizarModoMobile);
 
     return () => {
-      window.removeEventListener("resize", atualizarMobileVCP);
-      window.removeEventListener("orientationchange", atualizarMobileVCP);
+      window.removeEventListener("resize", atualizarModoMobile);
+      window.removeEventListener("orientationchange", atualizarModoMobile);
     };
   }, []);
 
@@ -1325,152 +1325,217 @@ export default function App() {
     const statusAtual = resposta.status || "NÃO VERIFICADO";
     const itemSemClassificacao = String(item.id || "") === "4.7";
 
-    const mobile = isMobileVCP;
+    const tituloItem = item.titulo || item.item || "Item VCP";
+    const descricaoItem = item.descricao || "";
 
-    const cardOperacionalStyle = mobile
-      ? {
-          ...vcpStyles.cardOperacional,
-          width: "100%",
-          maxWidth: "100%",
-          borderRadius: 20,
-          marginBottom: 18,
-          overflow: "hidden",
-        }
-      : vcpStyles.cardOperacional;
-
-    const cardCabecalhoStyle = mobile
-      ? { display: "none" }
-      : vcpStyles.cardCabecalho;
-
-    const cardConteudoStyle = mobile
-      ? {
-          ...vcpStyles.cardConteudo,
-          display: "flex",
-          flexDirection: "column",
-          gridTemplateColumns: "1fr",
-          width: "100%",
-          maxWidth: "100%",
-          borderTop: "none",
-        }
-      : vcpStyles.cardConteudo;
-
-    const numeroGrandeStyle = mobile
-      ? {
-          ...vcpStyles.numeroGrande,
-          width: "100%",
-          minHeight: "auto",
-          padding: "14px 16px",
-          justifyContent: "flex-start",
-          background: "linear-gradient(135deg, #2f3a40, #111827)",
-          color: "#ffffff",
-          borderRight: "none",
-          borderBottom: "1px solid rgba(15,23,42,0.18)",
-          fontSize: 20,
-        }
-      : vcpStyles.numeroGrande;
-
-    const blocoPerguntaStyle = mobile
-      ? {
-          ...vcpStyles.blocoPergunta,
-          width: "100%",
-          maxWidth: "100%",
-          padding: 16,
-          borderRight: "none",
-          borderBottom: "1px solid rgba(15,23,42,0.12)",
-          boxSizing: "border-box",
-        }
-      : vcpStyles.blocoPergunta;
-
-    const blocoCondicaoStyle = mobile
-      ? {
-          ...vcpStyles.blocoCondicao,
-          width: "100%",
-          maxWidth: "100%",
-          padding: 16,
-          boxSizing: "border-box",
-        }
-      : vcpStyles.blocoCondicao;
-
-    const quadradosLinhaStyle = mobile
-      ? {
-          ...vcpStyles.quadradosLinha,
-          display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
-          gap: 8,
-          width: "100%",
-          maxWidth: "100%",
-        }
-      : vcpStyles.quadradosLinha;
-
-    const quadradoStyleBase = mobile
-      ? {
-          ...vcpStyles.quadrado,
-          width: "100%",
-          minWidth: 0,
-          height: 42,
-          borderRadius: 14,
-        }
-      : vcpStyles.quadrado;
-
-    const escalaLinhaStyle = mobile
-      ? {
-          ...vcpStyles.escalaLinha,
-          maxWidth: "100%",
-          width: "100%",
-          fontSize: 13,
-        }
-      : vcpStyles.escalaLinha;
-
-    const textareaStyle = mobile
-      ? {
-          ...vcpStyles.textareaVCP,
-          width: "100%",
-          maxWidth: "100%",
-          minHeight: 135,
-          fontSize: 16,
-          boxSizing: "border-box",
-        }
-      : vcpStyles.textareaVCP;
-
-    return (
-      <article key={chave} style={cardOperacionalStyle}>
-        <div style={cardCabecalhoStyle}>
-          <span>Nº do item</span>
-          <span>Tema</span>
-          <span>Condição atual</span>
-        </div>
-
-        <div style={cardConteudoStyle}>
-          <div style={numeroGrandeStyle}>
-            {mobile ? `Item ${item.id}` : item.id}
+    if (isMobileVCP) {
+      return (
+        <article
+          key={chave}
+          style={{
+            background: "rgba(255,255,255,0.98)",
+            color: "#0f172a",
+            borderRadius: 18,
+            overflow: "hidden",
+            marginBottom: 18,
+            border: "1px solid rgba(15,23,42,0.18)",
+            boxShadow: "0 12px 28px rgba(0,0,0,0.18)",
+            width: "100%",
+          }}
+        >
+          <div
+            style={{
+              background: "linear-gradient(135deg, #111827, #2f3a40)",
+              color: "#ffffff",
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <strong style={{ fontSize: 18 }}>Item {item.id}</strong>
+            <span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span>
           </div>
 
-          <div style={blocoPerguntaStyle}>
-            <strong style={{ ...vcpStyles.temaCard, fontSize: mobile ? 18 : vcpStyles.temaCard.fontSize }}>
-              {item.titulo || item.item}
+          <div style={{ padding: 16, background: "#ffffff" }}>
+            <strong style={{ display: "block", fontSize: 19, lineHeight: 1.25, marginBottom: 10 }}>
+              {tituloItem}
             </strong>
-            <p style={{ ...vcpStyles.perguntaCard, fontSize: mobile ? 16 : undefined }}>
-              {item.descricao}
-            </p>
+            <p style={{ margin: "0 0 16px", fontSize: 16, lineHeight: 1.5 }}>{descricaoItem}</p>
 
             {!itemSemClassificacao && (
-              <div style={vcpStyles.classificacaoBox}>
-                <strong>Classificação:</strong>
-                <div style={quadradosLinhaStyle}>
+              <div style={{ marginTop: 14, marginBottom: 16 }}>
+                <strong style={{ display: "block", marginBottom: 8 }}>Classificação:</strong>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(5, 1fr)",
+                    gap: 8,
+                    width: "100%",
+                  }}
+                >
                   {[1, 2, 3, 4, 5].map((valor) => (
                     <button
                       key={valor}
                       type="button"
                       onClick={() => aplicarClassificacaoVCP(item, valor)}
                       style={{
-                        ...quadradoStyleBase,
+                        minHeight: 46,
+                        borderRadius: 16,
+                        border: "1px solid #111827",
+                        background: nota >= valor ? "#10b981" : "#ffffff",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                      title={`Classificação ${valor}`}
+                    />
+                  ))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 900, marginTop: 5 }}>
+                  <span>Ruim</span>
+                  <span>Ótimo</span>
+                </div>
+              </div>
+            )}
+
+            {itemSemClassificacao && (
+              <div style={{ ...vcpStyles.panBox, marginBottom: 14 }}>
+                <strong>Registro livre de achados:</strong><br />
+                Use este item para registrar riscos, pontos críticos, oportunidades de melhoria ou fatos relevantes que não apareceram nas perguntas anteriores.
+              </div>
+            )}
+
+            {item.referenciaNormativa?.length > 0 && (
+              <small style={{ display: "block", color: "#475569", fontWeight: 800, marginBottom: 16 }}>
+                Referência de apoio: {item.referenciaNormativa.join(" • ")}
+              </small>
+            )}
+          </div>
+
+          <div style={{ padding: 16, background: "#ffffff", borderTop: "1px solid rgba(15,23,42,0.14)" }}>
+            {itemSemClassificacao && (
+              <div className="status-row" style={{ marginTop: 0, marginBottom: 12 }}>
+                {["NÃO VERIFICADO", "CONFORME", "NÃO CONFORME"].map((status) => {
+                  const ativo = statusAtual === status;
+                  const classe = classeStatus(status);
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      className={ativo ? `status-btn ${classe} active` : `status-btn ${classe}`}
+                      onClick={() => atualizarResposta(item, "status", status)}
+                    >
+                      {status}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <label style={{ ...vcpStyles.labelVCP, marginTop: 0 }}>
+              Condição atual
+              <textarea
+                value={resposta.condicaoAtual || ""}
+                onChange={(e) => atualizarResposta(item, "condicaoAtual", e.target.value)}
+                placeholder={itemSemClassificacao ? "Descreva o item identificado, risco, oportunidade, achado relevante ou ponto crítico observado na visita." : "Descreva a condição atual observada em campo. Ex.: cerca íntegra, trechos danificados, ausência de barreira, pavimento com trincas..."}
+                style={{ ...vcpStyles.textareaVCP, minHeight: 145, fontSize: 16 }}
+              />
+            </label>
+
+            <div className="evidencias-box" style={{ marginTop: 14 }}>
+              <strong>Fotos da condição atual</strong>
+              <p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p>
+              <label className="upload-evidencia" style={{ width: "100%" }}>
+                Tirar foto ou anexar imagem
+                <input type="file" accept="image/*" capture="environment" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} />
+              </label>
+              {resposta.evidenciasAnexadas?.length > 0 && (
+                <div className="preview-evidencias">
+                  {resposta.evidenciasAnexadas.map((ev, indexEv) => (
+                    <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
+                      <img src={ev.data} alt={ev.nome} />
+                      {ev.latitude && ev.longitude && (
+                        <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
+                      )}
+                      <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <label style={vcpStyles.labelVCP}>
+              Observação
+              <textarea
+                value={resposta.obs || ""}
+                onChange={(e) => atualizarResposta(item, "obs", e.target.value)}
+                placeholder="Campo complementar técnico, recomendações, pendências e comentários da visita."
+                style={{ ...vcpStyles.textareaVCP, minHeight: 145, fontSize: 16 }}
+              />
+            </label>
+
+            <div className="grid field-grid" style={{ marginTop: 10 }}>
+              <div className="col-12">
+                <label>
+                  Responsável
+                  <input
+                    value={resposta.responsavel || usuarioLogado?.nomeCompleto || ""}
+                    onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)}
+                    placeholder="Responsável"
+                  />
+                </label>
+              </div>
+              <div className="col-12">
+                <label>
+                  Prazo
+                  <select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}>
+                    <option value="">Não definido</option>
+                    <option>IMEDIATO</option>
+                    <option>CURTO PRAZO</option>
+                    <option>MÉDIO PRAZO</option>
+                    <option>LONGO PRAZO</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+        </article>
+      );
+    }
+
+    return (
+      <article key={chave} style={vcpStyles.cardOperacional}>
+        <div style={vcpStyles.cardCabecalho}>
+          <span>Nº do item</span>
+          <span>Tema</span>
+          <span>Condição atual</span>
+        </div>
+
+        <div style={vcpStyles.cardConteudo}>
+          <div style={vcpStyles.numeroGrande}>{item.id}</div>
+          <div style={vcpStyles.blocoPergunta}>
+            <strong style={vcpStyles.temaCard}>{tituloItem}</strong>
+            <p style={vcpStyles.perguntaCard}>{descricaoItem}</p>
+
+            {!itemSemClassificacao && (
+              <div style={vcpStyles.classificacaoBox}>
+                <strong>Classificação:</strong>
+                <div style={vcpStyles.quadradosLinha}>
+                  {[1, 2, 3, 4, 5].map((valor) => (
+                    <button
+                      key={valor}
+                      type="button"
+                      onClick={() => aplicarClassificacaoVCP(item, valor)}
+                      style={{
+                        ...vcpStyles.quadrado,
                         ...(nota >= valor ? vcpStyles.quadradoAtivo : {}),
                       }}
                       title={`Classificação ${valor}`}
                     />
                   ))}
                 </div>
-                <div style={escalaLinhaStyle}>
+                <div style={vcpStyles.escalaLinha}>
                   <span>Ruim</span>
                   <span>Ótimo</span>
                 </div>
@@ -1489,7 +1554,7 @@ export default function App() {
             )}
           </div>
 
-          <div style={blocoCondicaoStyle}>
+          <div style={vcpStyles.blocoCondicao}>
             <span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span>
 
             {itemSemClassificacao && (
@@ -1517,19 +1582,19 @@ export default function App() {
                 value={resposta.condicaoAtual || ""}
                 onChange={(e) => atualizarResposta(item, "condicaoAtual", e.target.value)}
                 placeholder={itemSemClassificacao ? "Descreva o item identificado, risco, oportunidade, achado relevante ou ponto crítico observado na visita." : "Descreva a condição atual observada em campo. Ex.: cerca íntegra, trechos danificados, ausência de barreira, pavimento com trincas..."}
-                style={textareaStyle}
+                style={vcpStyles.textareaVCP}
               />
             </label>
 
-            <div className="evidencias-box" style={{ marginTop: 10, width: "100%", boxSizing: "border-box" }}>
+            <div className="evidencias-box" style={{ marginTop: 10 }}>
               <strong>Fotos da condição atual</strong>
               <p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p>
-              <label className="upload-evidencia" style={mobile ? { width: "100%", minHeight: 56, textAlign: "center" } : undefined}>
+              <label className="upload-evidencia">
                 Tirar foto ou anexar imagem
                 <input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} />
               </label>
               {resposta.evidenciasAnexadas?.length > 0 && (
-                <div className="preview-evidencias" style={mobile ? { gridTemplateColumns: "1fr", width: "100%" } : undefined}>
+                <div className="preview-evidencias">
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
                       <img src={ev.data} alt={ev.nome} />
@@ -1549,32 +1614,16 @@ export default function App() {
                 value={resposta.obs || ""}
                 onChange={(e) => atualizarResposta(item, "obs", e.target.value)}
                 placeholder="Campo complementar técnico, recomendações, pendências e comentários da visita."
-                style={textareaStyle}
+                style={vcpStyles.textareaVCP}
               />
             </label>
 
-            <div className="grid field-grid" style={{ marginTop: 10, gridTemplateColumns: mobile ? "1fr" : undefined }}>
-              <div className="col-6" style={mobile ? { gridColumn: "auto", width: "100%" } : undefined}>
-                <label>
-                  Responsável
-                  <input
-                    value={resposta.responsavel || usuarioLogado?.nomeCompleto || ""}
-                    onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)}
-                    placeholder="Responsável"
-                  />
-                </label>
+            <div className="grid field-grid" style={{ marginTop: 10 }}>
+              <div className="col-6">
+                <label>Responsável<input value={resposta.responsavel || usuarioLogado?.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label>
               </div>
-              <div className="col-6" style={mobile ? { gridColumn: "auto", width: "100%" } : undefined}>
-                <label>
-                  Prazo
-                  <select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}>
-                    <option value="">Não definido</option>
-                    <option>IMEDIATO</option>
-                    <option>CURTO PRAZO</option>
-                    <option>MÉDIO PRAZO</option>
-                    <option>LONGO PRAZO</option>
-                  </select>
-                </label>
+              <div className="col-6">
+                <label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label>
               </div>
             </div>
           </div>
