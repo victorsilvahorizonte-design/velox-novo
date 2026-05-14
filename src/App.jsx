@@ -849,6 +849,23 @@ export default function App() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarMinhasInspecoes, setMostrarMinhasInspecoes] = useState(true);
   const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
+  const [isMobileVCP, setIsMobileVCP] = useState(false);
+
+  useEffect(() => {
+    const atualizarMobileVCP = () => {
+      if (typeof window === "undefined") return;
+      setIsMobileVCP(window.innerWidth <= 768);
+    };
+
+    atualizarMobileVCP();
+    window.addEventListener("resize", atualizarMobileVCP);
+    window.addEventListener("orientationchange", atualizarMobileVCP);
+
+    return () => {
+      window.removeEventListener("resize", atualizarMobileVCP);
+      window.removeEventListener("orientationchange", atualizarMobileVCP);
+    };
+  }, []);
 
   const respostas = respostasPorNorma[normaSelecionada] || {};
 
@@ -1308,38 +1325,152 @@ export default function App() {
     const statusAtual = resposta.status || "NÃO VERIFICADO";
     const itemSemClassificacao = String(item.id || "") === "4.7";
 
+    const mobile = isMobileVCP;
+
+    const cardOperacionalStyle = mobile
+      ? {
+          ...vcpStyles.cardOperacional,
+          width: "100%",
+          maxWidth: "100%",
+          borderRadius: 20,
+          marginBottom: 18,
+          overflow: "hidden",
+        }
+      : vcpStyles.cardOperacional;
+
+    const cardCabecalhoStyle = mobile
+      ? { display: "none" }
+      : vcpStyles.cardCabecalho;
+
+    const cardConteudoStyle = mobile
+      ? {
+          ...vcpStyles.cardConteudo,
+          display: "flex",
+          flexDirection: "column",
+          gridTemplateColumns: "1fr",
+          width: "100%",
+          maxWidth: "100%",
+          borderTop: "none",
+        }
+      : vcpStyles.cardConteudo;
+
+    const numeroGrandeStyle = mobile
+      ? {
+          ...vcpStyles.numeroGrande,
+          width: "100%",
+          minHeight: "auto",
+          padding: "14px 16px",
+          justifyContent: "flex-start",
+          background: "linear-gradient(135deg, #2f3a40, #111827)",
+          color: "#ffffff",
+          borderRight: "none",
+          borderBottom: "1px solid rgba(15,23,42,0.18)",
+          fontSize: 20,
+        }
+      : vcpStyles.numeroGrande;
+
+    const blocoPerguntaStyle = mobile
+      ? {
+          ...vcpStyles.blocoPergunta,
+          width: "100%",
+          maxWidth: "100%",
+          padding: 16,
+          borderRight: "none",
+          borderBottom: "1px solid rgba(15,23,42,0.12)",
+          boxSizing: "border-box",
+        }
+      : vcpStyles.blocoPergunta;
+
+    const blocoCondicaoStyle = mobile
+      ? {
+          ...vcpStyles.blocoCondicao,
+          width: "100%",
+          maxWidth: "100%",
+          padding: 16,
+          boxSizing: "border-box",
+        }
+      : vcpStyles.blocoCondicao;
+
+    const quadradosLinhaStyle = mobile
+      ? {
+          ...vcpStyles.quadradosLinha,
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: 8,
+          width: "100%",
+          maxWidth: "100%",
+        }
+      : vcpStyles.quadradosLinha;
+
+    const quadradoStyleBase = mobile
+      ? {
+          ...vcpStyles.quadrado,
+          width: "100%",
+          minWidth: 0,
+          height: 42,
+          borderRadius: 14,
+        }
+      : vcpStyles.quadrado;
+
+    const escalaLinhaStyle = mobile
+      ? {
+          ...vcpStyles.escalaLinha,
+          maxWidth: "100%",
+          width: "100%",
+          fontSize: 13,
+        }
+      : vcpStyles.escalaLinha;
+
+    const textareaStyle = mobile
+      ? {
+          ...vcpStyles.textareaVCP,
+          width: "100%",
+          maxWidth: "100%",
+          minHeight: 135,
+          fontSize: 16,
+          boxSizing: "border-box",
+        }
+      : vcpStyles.textareaVCP;
+
     return (
-      <article key={chave} style={vcpStyles.cardOperacional}>
-        <div style={vcpStyles.cardCabecalho}>
+      <article key={chave} style={cardOperacionalStyle}>
+        <div style={cardCabecalhoStyle}>
           <span>Nº do item</span>
           <span>Tema</span>
           <span>Condição atual</span>
         </div>
 
-        <div style={vcpStyles.cardConteudo}>
-          <div style={vcpStyles.numeroGrande}>{item.id}</div>
-          <div style={vcpStyles.blocoPergunta}>
-            <strong style={vcpStyles.temaCard}>{item.titulo || item.item}</strong>
-            <p style={vcpStyles.perguntaCard}>{item.descricao}</p>
+        <div style={cardConteudoStyle}>
+          <div style={numeroGrandeStyle}>
+            {mobile ? `Item ${item.id}` : item.id}
+          </div>
+
+          <div style={blocoPerguntaStyle}>
+            <strong style={{ ...vcpStyles.temaCard, fontSize: mobile ? 18 : vcpStyles.temaCard.fontSize }}>
+              {item.titulo || item.item}
+            </strong>
+            <p style={{ ...vcpStyles.perguntaCard, fontSize: mobile ? 16 : undefined }}>
+              {item.descricao}
+            </p>
 
             {!itemSemClassificacao && (
               <div style={vcpStyles.classificacaoBox}>
                 <strong>Classificação:</strong>
-                <div style={vcpStyles.quadradosLinha}>
+                <div style={quadradosLinhaStyle}>
                   {[1, 2, 3, 4, 5].map((valor) => (
                     <button
                       key={valor}
                       type="button"
                       onClick={() => aplicarClassificacaoVCP(item, valor)}
                       style={{
-                        ...vcpStyles.quadrado,
+                        ...quadradoStyleBase,
                         ...(nota >= valor ? vcpStyles.quadradoAtivo : {}),
                       }}
                       title={`Classificação ${valor}`}
                     />
                   ))}
                 </div>
-                <div style={vcpStyles.escalaLinha}>
+                <div style={escalaLinhaStyle}>
                   <span>Ruim</span>
                   <span>Ótimo</span>
                 </div>
@@ -1358,7 +1489,7 @@ export default function App() {
             )}
           </div>
 
-          <div style={vcpStyles.blocoCondicao}>
+          <div style={blocoCondicaoStyle}>
             <span className={`status-pill ${classeStatus(statusAtual)}`}>{statusAtual}</span>
 
             {itemSemClassificacao && (
@@ -1386,19 +1517,19 @@ export default function App() {
                 value={resposta.condicaoAtual || ""}
                 onChange={(e) => atualizarResposta(item, "condicaoAtual", e.target.value)}
                 placeholder={itemSemClassificacao ? "Descreva o item identificado, risco, oportunidade, achado relevante ou ponto crítico observado na visita." : "Descreva a condição atual observada em campo. Ex.: cerca íntegra, trechos danificados, ausência de barreira, pavimento com trincas..."}
-                style={vcpStyles.textareaVCP}
+                style={textareaStyle}
               />
             </label>
 
-            <div className="evidencias-box" style={{ marginTop: 10 }}>
+            <div className="evidencias-box" style={{ marginTop: 10, width: "100%", boxSizing: "border-box" }}>
               <strong>Fotos da condição atual</strong>
               <p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p>
-              <label className="upload-evidencia">
+              <label className="upload-evidencia" style={mobile ? { width: "100%", minHeight: 56, textAlign: "center" } : undefined}>
                 Tirar foto ou anexar imagem
                 <input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} />
               </label>
               {resposta.evidenciasAnexadas?.length > 0 && (
-                <div className="preview-evidencias">
+                <div className="preview-evidencias" style={mobile ? { gridTemplateColumns: "1fr", width: "100%" } : undefined}>
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
                       <img src={ev.data} alt={ev.nome} />
@@ -1418,16 +1549,32 @@ export default function App() {
                 value={resposta.obs || ""}
                 onChange={(e) => atualizarResposta(item, "obs", e.target.value)}
                 placeholder="Campo complementar técnico, recomendações, pendências e comentários da visita."
-                style={vcpStyles.textareaVCP}
+                style={textareaStyle}
               />
             </label>
 
-            <div className="grid field-grid" style={{ marginTop: 10 }}>
-              <div className="col-6">
-                <label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label>
+            <div className="grid field-grid" style={{ marginTop: 10, gridTemplateColumns: mobile ? "1fr" : undefined }}>
+              <div className="col-6" style={mobile ? { gridColumn: "auto", width: "100%" } : undefined}>
+                <label>
+                  Responsável
+                  <input
+                    value={resposta.responsavel || usuarioLogado?.nomeCompleto || ""}
+                    onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)}
+                    placeholder="Responsável"
+                  />
+                </label>
               </div>
-              <div className="col-6">
-                <label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label>
+              <div className="col-6" style={mobile ? { gridColumn: "auto", width: "100%" } : undefined}>
+                <label>
+                  Prazo
+                  <select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}>
+                    <option value="">Não definido</option>
+                    <option>IMEDIATO</option>
+                    <option>CURTO PRAZO</option>
+                    <option>MÉDIO PRAZO</option>
+                    <option>LONGO PRAZO</option>
+                  </select>
+                </label>
               </div>
             </div>
           </div>
