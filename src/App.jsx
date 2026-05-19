@@ -27,6 +27,13 @@ import { buscarAerodromoConsolidado } from "./data/aerodromosConsolidados";
 import { buscarPANPorICAO } from "./data/pan/panData";
 
 import {
+  enviarEvidenciaParaStorage,
+  arquivoParaBase64,
+  obterUrlImagemEvidencia,
+  excluirEvidenciaDoStorage,
+} from "./services/firebaseStorageService";
+
+import {
   atualizarUsuarioFirebase,
   cadastrarUsuarioFirebase,
   entrarUsuarioFirebase,
@@ -461,6 +468,21 @@ function extensaoImagem(dataUrl) {
   return "jpeg";
 }
 
+
+async function imagemEvidenciaParaBase64(evidencia) {
+  const origem = obterUrlImagemEvidencia(evidencia);
+
+  if (!origem) {
+    throw new Error("Evidência sem imagem disponível.");
+  }
+
+  if (String(origem).startsWith("data:")) {
+    return origem;
+  }
+
+  return await urlParaBase64(origem);
+}
+
 function corStatus(status) {
   if (status === "CONFORME") return "16A34A";
   if (status === "NÃO CONFORME") return "EF4444";
@@ -554,22 +576,34 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
       // as imagens devem ir para Firebase Storage.
       if (Array.isArray(respostaLeve.evidenciasAnexadas)) {
         respostaLeve.evidenciasAnexadas = respostaLeve.evidenciasAnexadas.map((ev) => ({
+          id: ev?.id || "",
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
+          tamanho: ev?.tamanho ?? ev?.size ?? null,
           criadoEm: ev?.criadoEm || "",
+          capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
+          enviadoEm: ev?.enviadoEm || "",
           responsavel: ev?.responsavel || "",
+          itemVinculado: ev?.itemVinculado || "",
+          storagePath: ev?.storagePath || "",
+          downloadURL: ev?.downloadURL || ev?.url || "",
+          url: ev?.downloadURL || ev?.url || "",
+          imagemSalvaOnline: Boolean(ev?.downloadURL || ev?.url || ev?.storagePath || ev?.imagemSalvaOnline),
           latitude: ev?.latitude ?? ev?.geolocalizacao?.latitude ?? null,
           longitude: ev?.longitude ?? ev?.geolocalizacao?.longitude ?? null,
-          precisao: ev?.precisao ?? ev?.geolocalizacao?.precisao ?? null,
+          precisao: ev?.precisao ?? ev?.precisaoGPS ?? ev?.geolocalizacao?.precisao ?? null,
+          precisaoGPS: ev?.precisaoGPS ?? ev?.precisao ?? ev?.geolocalizacao?.precisao ?? null,
+          linkMaps: ev?.linkMaps || ev?.geolocalizacao?.linkMaps || "",
           geolocalizacao: ev?.geolocalizacao
             ? {
-                latitude: ev.geolocalizacao.latitude ?? null,
-                longitude: ev.geolocalizacao.longitude ?? null,
-                precisao: ev.geolocalizacao.precisao ?? null,
-                capturadoEm: ev.geolocalizacao.capturadoEm || ev?.criadoEm || "",
+                disponivel: ev.geolocalizacao.disponivel ?? true,
+                latitude: ev.geolocalizacao.latitude ?? ev?.latitude ?? null,
+                longitude: ev.geolocalizacao.longitude ?? ev?.longitude ?? null,
+                precisao: ev.geolocalizacao.precisao ?? ev?.precisaoGPS ?? null,
+                capturadoEm: ev.geolocalizacao.capturadoEm || ev?.capturadoEm || ev?.criadoEm || "",
+                linkMaps: ev.geolocalizacao.linkMaps || ev?.linkMaps || "",
               }
             : null,
-          imagemSalvaOnline: false,
         }));
       }
 
@@ -1454,7 +1488,7 @@ export default function App() {
                 <div className="preview-evidencias">
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
-                      <img src={ev.data} alt={ev.nome} />
+                      <img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
@@ -1597,7 +1631,7 @@ export default function App() {
                 <div className="preview-evidencias">
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
-                      <img src={ev.data} alt={ev.nome} />
+                      <img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
@@ -1747,18 +1781,28 @@ export default function App() {
   async function adicionarEvidencias(item, arquivos) {
     const chave = item.id || item.ref;
     const listaArquivos = Array.from(arquivos || []);
+
     if (!listaArquivos.length) return;
 
     const geolocalizacao = await capturarGeolocalizacaoEvidencia();
 
-    listaArquivos.forEach((arquivo) => {
-      const leitor = new FileReader();
+    for (const arquivo of listaArquivos) {
+      try {
+        const agora = new Date().toISOString();
+        const previewBase64 = await arquivoParaBase64(arquivo);
 
-      leitor.onload = () => {
+        const uploadResultado = await enviarEvidenciaParaStorage({
+          arquivo,
+          usuario: usuarioLogado,
+          inspecaoId: inspecaoAtualId || `TEMP-${Date.now()}`,
+          icao: configAerodromo?.icao || "SEMICAO",
+          normaId: normaSelecionada,
+          itemId: chave,
+        });
+
         setRespostasPorNorma((prev) => {
           const respostasNorma = prev[normaSelecionada] || {};
           const evidenciasAtuais = respostasNorma[chave]?.evidenciasAnexadas || [];
-          const agora = new Date().toISOString();
 
           return {
             ...prev,
@@ -1769,13 +1813,26 @@ export default function App() {
                 evidenciasAnexadas: [
                   ...evidenciasAtuais,
                   {
+                    id: `EV-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                     nome: arquivo.name,
                     tipo: arquivo.type,
-                    data: leitor.result,
+                    tamanho: arquivo.size,
                     criadoEm: agora,
                     capturadoEm: agora,
                     responsavel: usuarioLogado?.nomeCompleto || "",
                     itemVinculado: chave,
+
+                    // Preview local para exibir imediatamente no celular/PC atual.
+                    data: previewBase64,
+                    previewLocal: previewBase64,
+
+                    // Fonte oficial online para sincronizar celular ↔ PC e relatórios.
+                    storagePath: uploadResultado.storagePath,
+                    downloadURL: uploadResultado.downloadURL,
+                    url: uploadResultado.downloadURL,
+                    imagemSalvaOnline: true,
+                    enviadoEm: uploadResultado.enviadoEm,
+
                     geolocalizacao,
                     latitude: geolocalizacao?.latitude ?? null,
                     longitude: geolocalizacao?.longitude ?? null,
@@ -1787,10 +1844,11 @@ export default function App() {
             },
           };
         });
-      };
-
-      leitor.readAsDataURL(arquivo);
-    });
+      } catch (erro) {
+        console.error("Erro upload Firebase Storage:", erro);
+        alert("Erro ao enviar imagem para Firebase Storage. Verifique sua internet e tente novamente.");
+      }
+    }
   }
 
   function removerEvidencia(item, indexEvidencia) {
@@ -2501,7 +2559,7 @@ export default function App() {
         cell.alignment = { horizontal: "center", vertical: "middle" };
       });
 
-      evidencias.forEach((ev, index) => {
+      for (const [index, ev] of evidencias.entries()) {
         const rowIndex = index + 2;
         const row = wsFotos.addRow({
           id: ev.id,
@@ -2528,12 +2586,13 @@ export default function App() {
           };
         });
         try {
-          const imgId = workbook.addImage({ base64: ev.imagem.data, extension: extensaoImagem(ev.imagem.data) });
+          const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
+          const imgId = workbook.addImage({ base64: imagemBase64, extension: extensaoImagem(imagemBase64) });
           wsFotos.addImage(imgId, { tl: { col: 11.1, row: rowIndex - 0.9 }, ext: { width: 190, height: 110 } });
         } catch (erro) {
           console.error("Erro ao inserir foto VCP no Excel:", erro);
         }
-      });
+      }
 
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(
@@ -2819,7 +2878,7 @@ export default function App() {
         doc.setTextColor(...CORES.texto);
         doc.text("Fotos vinculadas aos cards", 14, 40);
         y = 54;
-        evidencias.forEach((ev) => {
+        for (const ev of evidencias) {
           if (y > 222) {
             rodapeVCP("Fotos vinculadas");
             doc.addPage();
@@ -2846,13 +2905,14 @@ export default function App() {
             doc.textWithLink("Ver no mapa", 93, y + 50, { url: ev.linkMaps || ev.imagem?.linkMaps });
           }
           try {
-            const formato = extensaoImagem(ev.imagem.data) === "png" ? "PNG" : "JPEG";
-            doc.addImage(ev.imagem.data, formato, 122, y - 1, 62, 46);
+            const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
+            const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
+            doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
           } catch (erro) {
             console.error("Erro ao inserir imagem VCP no PDF:", erro);
           }
           y += 65;
-        });
+        }
         rodapeVCP("Fotos vinculadas");
       }
 
@@ -3021,7 +3081,7 @@ export default function App() {
         cell.alignment = { horizontal: "center", vertical: "middle" };
       });
 
-      evidencias.forEach((ev, index) => {
+      for (const [index, ev] of evidencias.entries()) {
         const rowIndex = index + 2;
         const row = wsEvidencias.addRow({
           id: ev.id,
@@ -3044,12 +3104,13 @@ export default function App() {
         });
 
         try {
-          const imgId = workbook.addImage({ base64: ev.imagem.data, extension: extensaoImagem(ev.imagem.data) });
+          const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
+          const imgId = workbook.addImage({ base64: imagemBase64, extension: extensaoImagem(imagemBase64) });
           wsEvidencias.addImage(imgId, { tl: { col: 6.1, row: rowIndex - 0.9 }, ext: { width: 185, height: 105 } });
         } catch (erro) {
           console.error("Erro ao inserir imagem no Excel:", erro);
         }
-      });
+      }
 
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(
@@ -3306,7 +3367,7 @@ export default function App() {
         doc.text("Nenhuma evidência fotográfica foi anexada nesta inspeção.", 14, y);
       }
 
-      evidencias.forEach((ev) => {
+      for (const ev of evidencias) {
         if (y > 220) {
           doc.addPage();
           cabecalho("Evidências Fotográficas");
@@ -3328,8 +3389,9 @@ export default function App() {
         doc.text(doc.splitTextToSize(`Observação: ${ev.observacao || "-"}`, 95), 18, y + 38);
 
         try {
-          const formato = extensaoImagem(ev.imagem.data) === "png" ? "PNG" : "JPEG";
-          doc.addImage(ev.imagem.data, formato, 122, y - 1, 62, 46);
+          const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
+          const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
+          doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
         } catch (erro) {
           console.error("Erro ao inserir imagem no PDF:", erro);
           doc.setFontSize(8);
@@ -3337,7 +3399,7 @@ export default function App() {
           doc.text("Imagem não pôde ser renderizada.", 122, y + 15);
         }
         y += 65;
-      });
+      }
 
       rodape("Evidências");
       doc.save(`Relatorio_Completo_${configAerodromo.icao || "VELOX"}.pdf`);
@@ -4020,7 +4082,7 @@ export default function App() {
                 <div className="grid field-grid">
                   <div className="col-6"><label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label></div>
                   <div className="col-6"><label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label></div>
-                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><label className="upload-evidencia">Tirar foto ou anexar imagem<input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} /></label>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={ev.data} alt={ev.nome} /><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
+                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><label className="upload-evidencia">Tirar foto ou anexar imagem<input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} /></label>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} /><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
                   <div className="col-12"><label>Observações de campo<textarea value={resposta.obs || ""} onChange={(e) => atualizarResposta(item, "obs", e.target.value)} placeholder="Observações, evidências coletadas, pendências ou recomendações..." /></label></div>
                 </div>
               </article>
