@@ -1796,12 +1796,6 @@ export default function App() {
           icao: configAerodromo?.icao || "SEMICAO",
           normaId: normaSelecionada,
           itemId: chave,
-          previewLocal: previewBase64,
-          geolocalizacao,
-          latitude: geolocalizacao?.latitude ?? null,
-          longitude: geolocalizacao?.longitude ?? null,
-          precisaoGPS: geolocalizacao?.precisao ?? null,
-          linkMaps: geolocalizacao?.linkMaps || "",
         });
 
         setRespostasPorNorma((prev) => {
@@ -1954,35 +1948,6 @@ export default function App() {
     const lista = [];
     const normasParaLer = todasNormas ? NORMAS_GERAIS_RELATORIO_IDS : [normaSelecionada];
 
-    function normalizarImagemRelatorio(imagem, resposta = {}) {
-      const ev = imagem || {};
-      const previewLocal =
-        ev.previewLocal ||
-        (String(ev.data || "").startsWith("data:image") ? ev.data : "") ||
-        "";
-      const downloadURL = ev.downloadURL || ev.url || "";
-      const caminhoImagem = downloadURL || previewLocal || ev.data || "";
-
-      return {
-        ...ev,
-        data: caminhoImagem,
-        url: downloadURL || caminhoImagem,
-        downloadURL,
-        previewLocal,
-        storagePath: ev.storagePath || "",
-        imagemSalvaOnline: Boolean(ev.imagemSalvaOnline || downloadURL || ev.storagePath),
-        geolocalizacao: ev.geolocalizacao || null,
-        latitude: ev.latitude ?? ev.geolocalizacao?.latitude ?? null,
-        longitude: ev.longitude ?? ev.geolocalizacao?.longitude ?? null,
-        precisaoGPS: ev.precisaoGPS ?? ev.precisao ?? ev.geolocalizacao?.precisao ?? null,
-        precisao: ev.precisao ?? ev.precisaoGPS ?? ev.geolocalizacao?.precisao ?? null,
-        linkMaps: ev.linkMaps || ev.geolocalizacao?.linkMaps || "",
-        capturadoEm: ev.capturadoEm || ev.criadoEm || "",
-        criadoEm: ev.criadoEm || ev.capturadoEm || "",
-        responsavel: ev.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
-      };
-    }
-
     normasParaLer.forEach((normaId) => {
       const norma = NORMAS[normaId] || { itens: [] };
       const respostasNorma = respostasPorNorma[normaId] || {};
@@ -1992,13 +1957,9 @@ export default function App() {
         const chave = item.id || item.ref;
         const resposta = respostasNorma[chave] || {};
         const status = resposta.status || "NÃO VERIFICADO";
-        const imagens = Array.isArray(resposta.evidenciasAnexadas)
-          ? resposta.evidenciasAnexadas
-          : [];
+        const imagens = resposta.evidenciasAnexadas || [];
 
         imagens.forEach((imagem) => {
-          const imagemRelatorio = normalizarImagemRelatorio(imagem, resposta);
-
           lista.push({
             id: gerarIdEvidencia(lista.length),
             normaId,
@@ -2010,18 +1971,7 @@ export default function App() {
             condicaoAtual: resposta.condicaoAtual || "",
             classificacaoVCP: resposta.classificacaoVCP || "",
             status,
-            imagem: imagemRelatorio,
-            data: imagemRelatorio.data,
-            url: imagemRelatorio.url,
-            downloadURL: imagemRelatorio.downloadURL,
-            previewLocal: imagemRelatorio.previewLocal,
-            geolocalizacao: imagemRelatorio.geolocalizacao,
-            latitude: imagemRelatorio.latitude,
-            longitude: imagemRelatorio.longitude,
-            precisaoGPS: imagemRelatorio.precisaoGPS,
-            linkMaps: imagemRelatorio.linkMaps,
-            capturadoEm: imagemRelatorio.capturadoEm,
-            responsavel: imagemRelatorio.responsavel,
+            imagem,
           });
         });
       });
@@ -2447,46 +2397,10 @@ export default function App() {
 
   function montarEvidenciasVCP() {
     const lista = [];
-
-    function normalizarImagemVCP(imagem, resposta = {}) {
-      const ev = imagem || {};
-      const previewLocal =
-        ev.previewLocal ||
-        (String(ev.data || "").startsWith("data:image") ? ev.data : "") ||
-        "";
-      const downloadURL = ev.downloadURL || ev.url || "";
-      const caminhoImagem = downloadURL || previewLocal || ev.data || "";
-
-      return {
-        ...ev,
-        data: caminhoImagem,
-        url: downloadURL || caminhoImagem,
-        downloadURL,
-        previewLocal,
-        storagePath: ev.storagePath || "",
-        imagemSalvaOnline: Boolean(ev.imagemSalvaOnline || downloadURL || ev.storagePath),
-        geolocalizacao: ev.geolocalizacao || null,
-        latitude: ev.latitude ?? ev.geolocalizacao?.latitude ?? null,
-        longitude: ev.longitude ?? ev.geolocalizacao?.longitude ?? null,
-        precisaoGPS: ev.precisaoGPS ?? ev.precisao ?? ev.geolocalizacao?.precisao ?? null,
-        precisao: ev.precisao ?? ev.precisaoGPS ?? ev.geolocalizacao?.precisao ?? null,
-        linkMaps: ev.linkMaps || ev.geolocalizacao?.linkMaps || "",
-        capturadoEm: ev.capturadoEm || ev.criadoEm || "",
-        criadoEm: ev.criadoEm || ev.capturadoEm || "",
-        responsavel: ev.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
-      };
-    }
-
     obterItensVCPParaRelatorio().forEach((item) => {
       const chave = item.id || item.ref;
       const resposta = respostasPorNorma.VCP?.[chave] || {};
-      const imagens = Array.isArray(resposta.evidenciasAnexadas)
-        ? resposta.evidenciasAnexadas
-        : [];
-
-      imagens.forEach((imagem) => {
-        const imagemRelatorio = normalizarImagemVCP(imagem, resposta);
-
+      (resposta.evidenciasAnexadas || []).forEach((imagem) => {
         lista.push({
           id: gerarIdEvidencia(lista.length),
           normaId: "VCP",
@@ -2498,22 +2412,17 @@ export default function App() {
           condicaoAtual: resposta.condicaoAtual || "",
           classificacaoVCP: resposta.classificacaoVCP || "",
           status: resposta.status || "NÃO VERIFICADO",
-          imagem: imagemRelatorio,
-          data: imagemRelatorio.data,
-          url: imagemRelatorio.url,
-          downloadURL: imagemRelatorio.downloadURL,
-          previewLocal: imagemRelatorio.previewLocal,
-          geolocalizacao: imagemRelatorio.geolocalizacao,
-          latitude: imagemRelatorio.latitude,
-          longitude: imagemRelatorio.longitude,
-          precisaoGPS: imagemRelatorio.precisaoGPS,
-          linkMaps: imagemRelatorio.linkMaps,
-          capturadoEm: imagemRelatorio.capturadoEm,
-          responsavel: imagemRelatorio.responsavel,
+          imagem,
+          geolocalizacao: imagem.geolocalizacao || null,
+          latitude: imagem.latitude ?? imagem.geolocalizacao?.latitude ?? null,
+          longitude: imagem.longitude ?? imagem.geolocalizacao?.longitude ?? null,
+          precisaoGPS: imagem.precisaoGPS ?? imagem.geolocalizacao?.precisao ?? null,
+          linkMaps: imagem.linkMaps || imagem.geolocalizacao?.linkMaps || "",
+          capturadoEm: imagem.capturadoEm || imagem.criadoEm || "",
+          responsavel: imagem.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
         });
       });
     });
-
     return lista;
   }
 
