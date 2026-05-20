@@ -468,19 +468,20 @@ function extensaoImagem(dataUrl) {
   return "jpeg";
 }
 
+async function prepararImagemParaRelatorio(imagem) {
+  try {
+    const fonte = obterUrlImagemEvidencia(imagem);
+    if (!fonte) return "";
 
-async function imagemEvidenciaParaBase64(evidencia) {
-  const origem = obterUrlImagemEvidencia(evidencia);
+    if (String(fonte).startsWith("data:image")) {
+      return fonte;
+    }
 
-  if (!origem) {
-    throw new Error("Evidência sem imagem disponível.");
+    return await urlParaBase64(fonte);
+  } catch (erro) {
+    console.error("Erro ao preparar imagem para relatório:", erro);
+    return "";
   }
-
-  if (String(origem).startsWith("data:")) {
-    return origem;
-  }
-
-  return await urlParaBase64(origem);
 }
 
 function corStatus(status) {
@@ -579,7 +580,7 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           id: ev?.id || "",
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
-          tamanho: ev?.tamanho ?? ev?.size ?? null,
+          tamanho: ev?.tamanho || ev?.size || null,
           criadoEm: ev?.criadoEm || "",
           capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
           enviadoEm: ev?.enviadoEm || "",
@@ -587,20 +588,18 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           itemVinculado: ev?.itemVinculado || "",
           storagePath: ev?.storagePath || "",
           downloadURL: ev?.downloadURL || ev?.url || "",
-          url: ev?.downloadURL || ev?.url || "",
-          imagemSalvaOnline: Boolean(ev?.downloadURL || ev?.url || ev?.storagePath || ev?.imagemSalvaOnline),
+          imagemSalvaOnline: Boolean(ev?.downloadURL || ev?.storagePath || ev?.imagemSalvaOnline),
           latitude: ev?.latitude ?? ev?.geolocalizacao?.latitude ?? null,
           longitude: ev?.longitude ?? ev?.geolocalizacao?.longitude ?? null,
-          precisao: ev?.precisao ?? ev?.precisaoGPS ?? ev?.geolocalizacao?.precisao ?? null,
           precisaoGPS: ev?.precisaoGPS ?? ev?.precisao ?? ev?.geolocalizacao?.precisao ?? null,
+          precisao: ev?.precisao ?? ev?.precisaoGPS ?? ev?.geolocalizacao?.precisao ?? null,
           linkMaps: ev?.linkMaps || ev?.geolocalizacao?.linkMaps || "",
           geolocalizacao: ev?.geolocalizacao
             ? {
-                disponivel: ev.geolocalizacao.disponivel ?? true,
-                latitude: ev.geolocalizacao.latitude ?? ev?.latitude ?? null,
-                longitude: ev.geolocalizacao.longitude ?? ev?.longitude ?? null,
-                precisao: ev.geolocalizacao.precisao ?? ev?.precisaoGPS ?? null,
-                capturadoEm: ev.geolocalizacao.capturadoEm || ev?.capturadoEm || ev?.criadoEm || "",
+                latitude: ev.geolocalizacao.latitude ?? null,
+                longitude: ev.geolocalizacao.longitude ?? null,
+                precisao: ev.geolocalizacao.precisao ?? null,
+                capturadoEm: ev.geolocalizacao.capturadoEm || ev?.criadoEm || "",
                 linkMaps: ev.geolocalizacao.linkMaps || ev?.linkMaps || "",
               }
             : null,
@@ -1781,7 +1780,6 @@ export default function App() {
   async function adicionarEvidencias(item, arquivos) {
     const chave = item.id || item.ref;
     const listaArquivos = Array.from(arquivos || []);
-
     if (!listaArquivos.length) return;
 
     const geolocalizacao = await capturarGeolocalizacaoEvidencia();
@@ -1798,6 +1796,12 @@ export default function App() {
           icao: configAerodromo?.icao || "SEMICAO",
           normaId: normaSelecionada,
           itemId: chave,
+          previewLocal: previewBase64,
+          geolocalizacao,
+          latitude: geolocalizacao?.latitude ?? null,
+          longitude: geolocalizacao?.longitude ?? null,
+          precisaoGPS: geolocalizacao?.precisao ?? null,
+          linkMaps: geolocalizacao?.linkMaps || "",
         });
 
         setRespostasPorNorma((prev) => {
@@ -1817,22 +1821,16 @@ export default function App() {
                     nome: arquivo.name,
                     tipo: arquivo.type,
                     tamanho: arquivo.size,
-                    criadoEm: agora,
-                    capturadoEm: agora,
-                    responsavel: usuarioLogado?.nomeCompleto || "",
-                    itemVinculado: chave,
-
-                    // Preview local para exibir imediatamente no celular/PC atual.
                     data: previewBase64,
                     previewLocal: previewBase64,
-
-                    // Fonte oficial online para sincronizar celular ↔ PC e relatórios.
                     storagePath: uploadResultado.storagePath,
                     downloadURL: uploadResultado.downloadURL,
-                    url: uploadResultado.downloadURL,
                     imagemSalvaOnline: true,
-                    enviadoEm: uploadResultado.enviadoEm,
-
+                    criadoEm: agora,
+                    capturadoEm: agora,
+                    enviadoEm: uploadResultado.enviadoEm || agora,
+                    responsavel: usuarioLogado?.nomeCompleto || "",
+                    itemVinculado: chave,
                     geolocalizacao,
                     latitude: geolocalizacao?.latitude ?? null,
                     longitude: geolocalizacao?.longitude ?? null,
@@ -1846,7 +1844,7 @@ export default function App() {
         });
       } catch (erro) {
         console.error("Erro upload Firebase Storage:", erro);
-        alert("Erro ao enviar imagem para Firebase Storage. Verifique sua internet e tente novamente.");
+        alert("Erro ao enviar imagem para Firebase Storage.");
       }
     }
   }
@@ -1956,6 +1954,35 @@ export default function App() {
     const lista = [];
     const normasParaLer = todasNormas ? NORMAS_GERAIS_RELATORIO_IDS : [normaSelecionada];
 
+    function normalizarImagemRelatorio(imagem, resposta = {}) {
+      const ev = imagem || {};
+      const previewLocal =
+        ev.previewLocal ||
+        (String(ev.data || "").startsWith("data:image") ? ev.data : "") ||
+        "";
+      const downloadURL = ev.downloadURL || ev.url || "";
+      const caminhoImagem = downloadURL || previewLocal || ev.data || "";
+
+      return {
+        ...ev,
+        data: caminhoImagem,
+        url: downloadURL || caminhoImagem,
+        downloadURL,
+        previewLocal,
+        storagePath: ev.storagePath || "",
+        imagemSalvaOnline: Boolean(ev.imagemSalvaOnline || downloadURL || ev.storagePath),
+        geolocalizacao: ev.geolocalizacao || null,
+        latitude: ev.latitude ?? ev.geolocalizacao?.latitude ?? null,
+        longitude: ev.longitude ?? ev.geolocalizacao?.longitude ?? null,
+        precisaoGPS: ev.precisaoGPS ?? ev.precisao ?? ev.geolocalizacao?.precisao ?? null,
+        precisao: ev.precisao ?? ev.precisaoGPS ?? ev.geolocalizacao?.precisao ?? null,
+        linkMaps: ev.linkMaps || ev.geolocalizacao?.linkMaps || "",
+        capturadoEm: ev.capturadoEm || ev.criadoEm || "",
+        criadoEm: ev.criadoEm || ev.capturadoEm || "",
+        responsavel: ev.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
+      };
+    }
+
     normasParaLer.forEach((normaId) => {
       const norma = NORMAS[normaId] || { itens: [] };
       const respostasNorma = respostasPorNorma[normaId] || {};
@@ -1965,9 +1992,13 @@ export default function App() {
         const chave = item.id || item.ref;
         const resposta = respostasNorma[chave] || {};
         const status = resposta.status || "NÃO VERIFICADO";
-        const imagens = resposta.evidenciasAnexadas || [];
+        const imagens = Array.isArray(resposta.evidenciasAnexadas)
+          ? resposta.evidenciasAnexadas
+          : [];
 
         imagens.forEach((imagem) => {
+          const imagemRelatorio = normalizarImagemRelatorio(imagem, resposta);
+
           lista.push({
             id: gerarIdEvidencia(lista.length),
             normaId,
@@ -1979,7 +2010,18 @@ export default function App() {
             condicaoAtual: resposta.condicaoAtual || "",
             classificacaoVCP: resposta.classificacaoVCP || "",
             status,
-            imagem,
+            imagem: imagemRelatorio,
+            data: imagemRelatorio.data,
+            url: imagemRelatorio.url,
+            downloadURL: imagemRelatorio.downloadURL,
+            previewLocal: imagemRelatorio.previewLocal,
+            geolocalizacao: imagemRelatorio.geolocalizacao,
+            latitude: imagemRelatorio.latitude,
+            longitude: imagemRelatorio.longitude,
+            precisaoGPS: imagemRelatorio.precisaoGPS,
+            linkMaps: imagemRelatorio.linkMaps,
+            capturadoEm: imagemRelatorio.capturadoEm,
+            responsavel: imagemRelatorio.responsavel,
           });
         });
       });
@@ -2405,10 +2447,46 @@ export default function App() {
 
   function montarEvidenciasVCP() {
     const lista = [];
+
+    function normalizarImagemVCP(imagem, resposta = {}) {
+      const ev = imagem || {};
+      const previewLocal =
+        ev.previewLocal ||
+        (String(ev.data || "").startsWith("data:image") ? ev.data : "") ||
+        "";
+      const downloadURL = ev.downloadURL || ev.url || "";
+      const caminhoImagem = downloadURL || previewLocal || ev.data || "";
+
+      return {
+        ...ev,
+        data: caminhoImagem,
+        url: downloadURL || caminhoImagem,
+        downloadURL,
+        previewLocal,
+        storagePath: ev.storagePath || "",
+        imagemSalvaOnline: Boolean(ev.imagemSalvaOnline || downloadURL || ev.storagePath),
+        geolocalizacao: ev.geolocalizacao || null,
+        latitude: ev.latitude ?? ev.geolocalizacao?.latitude ?? null,
+        longitude: ev.longitude ?? ev.geolocalizacao?.longitude ?? null,
+        precisaoGPS: ev.precisaoGPS ?? ev.precisao ?? ev.geolocalizacao?.precisao ?? null,
+        precisao: ev.precisao ?? ev.precisaoGPS ?? ev.geolocalizacao?.precisao ?? null,
+        linkMaps: ev.linkMaps || ev.geolocalizacao?.linkMaps || "",
+        capturadoEm: ev.capturadoEm || ev.criadoEm || "",
+        criadoEm: ev.criadoEm || ev.capturadoEm || "",
+        responsavel: ev.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
+      };
+    }
+
     obterItensVCPParaRelatorio().forEach((item) => {
       const chave = item.id || item.ref;
       const resposta = respostasPorNorma.VCP?.[chave] || {};
-      (resposta.evidenciasAnexadas || []).forEach((imagem) => {
+      const imagens = Array.isArray(resposta.evidenciasAnexadas)
+        ? resposta.evidenciasAnexadas
+        : [];
+
+      imagens.forEach((imagem) => {
+        const imagemRelatorio = normalizarImagemVCP(imagem, resposta);
+
         lista.push({
           id: gerarIdEvidencia(lista.length),
           normaId: "VCP",
@@ -2420,17 +2498,22 @@ export default function App() {
           condicaoAtual: resposta.condicaoAtual || "",
           classificacaoVCP: resposta.classificacaoVCP || "",
           status: resposta.status || "NÃO VERIFICADO",
-          imagem,
-          geolocalizacao: imagem.geolocalizacao || null,
-          latitude: imagem.latitude ?? imagem.geolocalizacao?.latitude ?? null,
-          longitude: imagem.longitude ?? imagem.geolocalizacao?.longitude ?? null,
-          precisaoGPS: imagem.precisaoGPS ?? imagem.geolocalizacao?.precisao ?? null,
-          linkMaps: imagem.linkMaps || imagem.geolocalizacao?.linkMaps || "",
-          capturadoEm: imagem.capturadoEm || imagem.criadoEm || "",
-          responsavel: imagem.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
+          imagem: imagemRelatorio,
+          data: imagemRelatorio.data,
+          url: imagemRelatorio.url,
+          downloadURL: imagemRelatorio.downloadURL,
+          previewLocal: imagemRelatorio.previewLocal,
+          geolocalizacao: imagemRelatorio.geolocalizacao,
+          latitude: imagemRelatorio.latitude,
+          longitude: imagemRelatorio.longitude,
+          precisaoGPS: imagemRelatorio.precisaoGPS,
+          linkMaps: imagemRelatorio.linkMaps,
+          capturadoEm: imagemRelatorio.capturadoEm,
+          responsavel: imagemRelatorio.responsavel,
         });
       });
     });
+
     return lista;
   }
 
@@ -2586,9 +2669,13 @@ export default function App() {
           };
         });
         try {
-          const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
-          const imgId = workbook.addImage({ base64: imagemBase64, extension: extensaoImagem(imagemBase64) });
-          wsFotos.addImage(imgId, { tl: { col: 11.1, row: rowIndex - 0.9 }, ext: { width: 190, height: 110 } });
+          const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
+          if (imagemBase64) {
+            const imgId = workbook.addImage({ base64: imagemBase64, extension: extensaoImagem(imagemBase64) });
+            wsFotos.addImage(imgId, { tl: { col: 11.1, row: rowIndex - 0.9 }, ext: { width: 190, height: 110 } });
+          } else {
+            row.getCell("foto").value = "Imagem não disponível";
+          }
         } catch (erro) {
           console.error("Erro ao inserir foto VCP no Excel:", erro);
         }
@@ -2905,9 +2992,15 @@ export default function App() {
             doc.textWithLink("Ver no mapa", 93, y + 50, { url: ev.linkMaps || ev.imagem?.linkMaps });
           }
           try {
-            const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
-            const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
-            doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+            const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
+            if (imagemBase64) {
+              const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
+              doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+            } else {
+              doc.setFontSize(8);
+              doc.setTextColor(239, 68, 68);
+              doc.text("Imagem não disponível.", 122, y + 15);
+            }
           } catch (erro) {
             console.error("Erro ao inserir imagem VCP no PDF:", erro);
           }
@@ -3104,9 +3197,13 @@ export default function App() {
         });
 
         try {
-          const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
-          const imgId = workbook.addImage({ base64: imagemBase64, extension: extensaoImagem(imagemBase64) });
-          wsEvidencias.addImage(imgId, { tl: { col: 6.1, row: rowIndex - 0.9 }, ext: { width: 185, height: 105 } });
+          const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
+          if (imagemBase64) {
+            const imgId = workbook.addImage({ base64: imagemBase64, extension: extensaoImagem(imagemBase64) });
+            wsEvidencias.addImage(imgId, { tl: { col: 6.1, row: rowIndex - 0.9 }, ext: { width: 185, height: 105 } });
+          } else {
+            row.getCell("foto").value = "Imagem não disponível";
+          }
         } catch (erro) {
           console.error("Erro ao inserir imagem no Excel:", erro);
         }
@@ -3389,9 +3486,15 @@ export default function App() {
         doc.text(doc.splitTextToSize(`Observação: ${ev.observacao || "-"}`, 95), 18, y + 38);
 
         try {
-          const imagemBase64 = await imagemEvidenciaParaBase64(ev.imagem);
-          const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
-          doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+          const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
+          if (imagemBase64) {
+            const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
+            doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+          } else {
+            doc.setFontSize(8);
+            doc.setTextColor(239, 68, 68);
+            doc.text("Imagem não disponível.", 122, y + 15);
+          }
         } catch (erro) {
           console.error("Erro ao inserir imagem no PDF:", erro);
           doc.setFontSize(8);
