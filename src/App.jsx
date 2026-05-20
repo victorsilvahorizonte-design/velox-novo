@@ -677,6 +677,44 @@ function reconstruirRespostasPorNorma(inspecao) {
   return reconstruido;
 }
 
+
+function obterTimestampInspecao(inspecao = {}) {
+  return new Date(inspecao.atualizadoEm || inspecao.criadoEm || 0).getTime() || 0;
+}
+
+function mesclarInspecoesPorAtualizacao(...listas) {
+  const mapa = new Map();
+
+  listas.flat().filter(Boolean).forEach((inspecao) => {
+    if (!inspecao?.id) return;
+    const existente = mapa.get(inspecao.id);
+    if (!existente || obterTimestampInspecao(inspecao) >= obterTimestampInspecao(existente)) {
+      mapa.set(inspecao.id, inspecao);
+    }
+  });
+
+  return Array.from(mapa.values()).sort(
+    (a, b) => obterTimestampInspecao(b) - obterTimestampInspecao(a)
+  );
+}
+
+function rolarParaConsultaICAO() {
+  if (typeof window === "undefined") return;
+  window.setTimeout(() => {
+    const alvo = document.getElementById("consulta-icao-section") || document.querySelector(".consulta-card");
+    if (alvo?.scrollIntoView) {
+      alvo.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, 250);
+}
+
+function limparInputArquivo(evento) {
+  if (evento?.target) evento.target.value = "";
+}
+
+
 function prepararInspecaoParaFirebase(objeto) {
   const limpo = sanitizarObjetoFirebase(objeto);
 
@@ -1006,8 +1044,11 @@ export default function App() {
     });
 
     const cancelarInspecoes = observarInspecoesFirebase((listaInspecoes) => {
-      setInspecoes(Array.isArray(listaInspecoes) ? listaInspecoes : []);
-      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(listaInspecoes || []));
+      const online = Array.isArray(listaInspecoes) ? listaInspecoes : [];
+      const local = safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []);
+      const mescladas = mesclarInspecoesPorAtualizacao(local, online);
+      setInspecoes(mescladas);
+      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(mescladas));
     });
 
     const respostasAntigas = safeParse(localStorage.getItem("respostas-inspecao"), null);
@@ -1047,25 +1088,6 @@ export default function App() {
       localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
     }
   }, [usuarioLogado]);
-
-  // AUTOSSALVAMENTO V3 VELOX
-  // Salva automaticamente a inspeção a cada 60 segundos quando houver usuário logado
-  // e aeródromo carregado. Mantém sincronização celular ↔ PC via Firebase.
-  useEffect(() => {
-    if (!usuarioLogado) return;
-    if (!configAerodromo?.icao && !configAerodromo?.nomeAerodromo) return;
-
-    const timerAutoSave = window.setInterval(() => {
-      try {
-        salvarInspecaoAtual();
-      } catch (erro) {
-        console.warn("Autossalvamento não executado:", erro);
-      }
-    }, 60000);
-
-    return () => window.clearInterval(timerAutoSave);
-  }, [usuarioLogado, configAerodromo, respostasPorNorma, inspecaoAtualId]);
-
 
   async function carregarBaseSeNecessario() {
     if (baseANAC.length > 0) return baseANAC;
@@ -1485,11 +1507,6 @@ export default function App() {
                   <span>Ruim</span>
                   <span>Ótimo</span>
                 </div>
-                {nota > 0 && (
-                  <div style={{ marginTop: 10, fontWeight: 900, color: statusAtual === "CONFORME" ? "#16a34a" : "#ef4444" }}>
-                    Resultado automático: {statusAtual}
-                  </div>
-                )}
               </div>
             )}
 
@@ -1540,19 +1557,25 @@ export default function App() {
             <div className="evidencias-box" style={{ marginTop: 14 }}>
               <strong>Fotos da condição atual</strong>
               <p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p>
-              <label className="upload-evidencia" style={{ width: "100%" }}>
-                Tirar foto ou anexar imagem
-                <input type="file" accept="image/*" capture="environment" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} />
-              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+                <label className="upload-evidencia" style={{ width: "100%" }}>
+                  📷 Tirar foto
+                  <input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                </label>
+                <label className="upload-evidencia" style={{ width: "100%" }}>
+                  🖼 Anexar da galeria
+                  <input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                </label>
+              </div>
               {resposta.evidenciasAnexadas?.length > 0 && (
                 <div className="preview-evidencias">
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
                       <img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />
+                      {ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
-                      <button type="button" onClick={() => salvarEvidenciaNoDispositivo(ev)}>Salvar foto no dispositivo</button>
                       <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
                     </div>
                   ))}
@@ -1634,11 +1657,6 @@ export default function App() {
                   <span>Ruim</span>
                   <span>Ótimo</span>
                 </div>
-                {nota > 0 && (
-                  <div style={{ marginTop: 10, fontWeight: 900, color: statusAtual === "CONFORME" ? "#16a34a" : "#ef4444" }}>
-                    Resultado automático: {statusAtual}
-                  </div>
-                )}
               </div>
             )}
 
@@ -1689,19 +1707,25 @@ export default function App() {
             <div className="evidencias-box" style={{ marginTop: 10 }}>
               <strong>Fotos da condição atual</strong>
               <p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p>
-              <label className="upload-evidencia">
-                Tirar foto ou anexar imagem
-                <input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} />
-              </label>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <label className="upload-evidencia">
+                  📷 Tirar foto
+                  <input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                </label>
+                <label className="upload-evidencia">
+                  🖼 Anexar da galeria
+                  <input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                </label>
+              </div>
               {resposta.evidenciasAnexadas?.length > 0 && (
                 <div className="preview-evidencias">
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
                       <img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />
+                      {ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
-                      <button type="button" onClick={() => salvarEvidenciaNoDispositivo(ev)}>Salvar foto no dispositivo</button>
                       <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
                     </div>
                   ))}
@@ -1847,17 +1871,29 @@ export default function App() {
 
   async function adicionarEvidencias(item, arquivos) {
     const chave = item.id || item.ref;
-    const listaArquivos = Array.from(arquivos || []);
+    const listaArquivos = Array.from(arquivos || []).filter((arquivo) =>
+      String(arquivo?.type || "").startsWith("image/")
+    );
     if (!listaArquivos.length) return;
 
     const geolocalizacao = await capturarGeolocalizacaoEvidencia();
 
     for (const arquivo of listaArquivos) {
-      try {
-        const agora = new Date().toISOString();
-        const previewBase64 = await arquivoParaBase64(arquivo);
+      const agora = new Date().toISOString();
+      let previewBase64 = "";
+      let uploadResultado = null;
+      let erroUpload = null;
 
-        const uploadResultado = await enviarEvidenciaParaStorage({
+      try {
+        previewBase64 = await arquivoParaBase64(arquivo);
+      } catch (erro) {
+        console.error("Erro ao gerar preview local da imagem:", erro);
+        alert("Não foi possível ler a imagem selecionada.");
+        continue;
+      }
+
+      try {
+        uploadResultado = await enviarEvidenciaParaStorage({
           arquivo,
           usuario: usuarioLogado,
           inspecaoId: inspecaoAtualId || `TEMP-${Date.now()}`,
@@ -1872,76 +1908,51 @@ export default function App() {
           linkMaps: geolocalizacao?.linkMaps || "",
           responsavel: usuarioLogado?.nomeCompleto || "",
         });
-
-        setRespostasPorNorma((prev) => {
-          const respostasNorma = prev[normaSelecionada] || {};
-          const evidenciasAtuais = respostasNorma[chave]?.evidenciasAnexadas || [];
-
-          return {
-            ...prev,
-            [normaSelecionada]: {
-              ...respostasNorma,
-              [chave]: {
-                ...respostasNorma[chave],
-                evidenciasAnexadas: [
-                  ...evidenciasAtuais,
-                  {
-                    id: `EV-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                    nome: arquivo.name,
-                    tipo: arquivo.type,
-                    tamanho: arquivo.size,
-                    data: previewBase64,
-                    previewLocal: previewBase64,
-                    storagePath: uploadResultado.storagePath || "",
-                    downloadURL: uploadResultado.downloadURL || "",
-                    url: uploadResultado.downloadURL || uploadResultado.url || "",
-                    imagemSalvaOnline: Boolean(uploadResultado.downloadURL || uploadResultado.storagePath),
-                    criadoEm: agora,
-                    capturadoEm: agora,
-                    enviadoEm: uploadResultado.enviadoEm || agora,
-                    responsavel: usuarioLogado?.nomeCompleto || "",
-                    itemVinculado: chave,
-                    geolocalizacao,
-                    latitude: geolocalizacao?.latitude ?? null,
-                    longitude: geolocalizacao?.longitude ?? null,
-                    precisaoGPS: geolocalizacao?.precisao ?? null,
-                    linkMaps: geolocalizacao?.linkMaps || "",
-                  },
-                ],
-              },
-            },
-          };
-        });
       } catch (erro) {
-        console.error("Erro upload Firebase Storage:", erro);
-        alert("Erro ao enviar imagem para Firebase Storage.");
-      }
-    }
-  }
-
-  function salvarEvidenciaNoDispositivo(evidencia) {
-    try {
-      const fonte = obterUrlImagemEvidencia(evidencia);
-      if (!fonte) {
-        alert("Imagem não disponível para salvar.");
-        return;
+        erroUpload = erro;
+        console.warn("Imagem mantida localmente; upload online será feito em novo salvamento/conexão:", erro);
       }
 
-      const nomeArquivo =
-        evidencia?.nome ||
-        `evidencia-${evidencia?.id || Date.now()}.jpg`;
+      const evidenciaNova = {
+        id: `EV-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        nome: arquivo.name || `foto-${Date.now()}.jpg`,
+        tipo: arquivo.type || "image/jpeg",
+        tamanho: arquivo.size || null,
+        data: previewBase64,
+        previewLocal: previewBase64,
+        storagePath: uploadResultado?.storagePath || "",
+        downloadURL: uploadResultado?.downloadURL || "",
+        url: uploadResultado?.downloadURL || uploadResultado?.url || "",
+        imagemSalvaOnline: Boolean(uploadResultado?.downloadURL || uploadResultado?.storagePath),
+        pendenteUpload: Boolean(erroUpload),
+        erroUpload: erroUpload ? mensagemErroFirebase?.(erroUpload) || String(erroUpload?.message || erroUpload) : "",
+        criadoEm: agora,
+        capturadoEm: agora,
+        enviadoEm: uploadResultado?.enviadoEm || "",
+        responsavel: usuarioLogado?.nomeCompleto || "",
+        itemVinculado: chave,
+        geolocalizacao,
+        latitude: geolocalizacao?.latitude ?? null,
+        longitude: geolocalizacao?.longitude ?? null,
+        precisaoGPS: geolocalizacao?.precisao ?? null,
+        linkMaps: geolocalizacao?.linkMaps || "",
+      };
 
-      const link = document.createElement("a");
-      link.href = fonte;
-      link.download = nomeArquivo;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (erro) {
-      console.error("Erro ao salvar imagem no dispositivo:", erro);
-      alert("Não foi possível salvar a imagem no dispositivo.");
+      setRespostasPorNorma((prev) => {
+        const respostasNorma = prev[normaSelecionada] || {};
+        const evidenciasAtuais = respostasNorma[chave]?.evidenciasAnexadas || [];
+
+        return {
+          ...prev,
+          [normaSelecionada]: {
+            ...respostasNorma,
+            [chave]: {
+              ...respostasNorma[chave],
+              evidenciasAnexadas: [...evidenciasAtuais, evidenciaNova],
+            },
+          },
+        };
+      });
     }
   }
 
@@ -2132,7 +2143,7 @@ export default function App() {
     };
   }
 
-  function salvarInspecaoAtual() {
+  async function salvarInspecaoAtual() {
     if (!usuarioLogado) {
       alert("Faça login para salvar a inspeção.");
       return null;
@@ -2144,24 +2155,25 @@ export default function App() {
     }
 
     const objeto = criarObjetoInspecao(inspecaoAtualId);
+    const proximaLista = mesclarInspecoesPorAtualizacao([objeto], inspecoes);
 
-    setInspecoes((prev) => {
-      const existe = prev.some((insp) => insp.id === objeto.id);
-      if (existe) return prev.map((insp) => (insp.id === objeto.id ? objeto : insp));
-      return [objeto, ...prev];
-    });
-
-    salvarInspecaoFirebase(prepararInspecaoParaFirebase(objeto)).catch((erro) => {
-      console.error(erro);
-      alert(`Erro ao salvar inspeção online: ${mensagemErroFirebase(erro)}`);
-    });
-
+    setInspecoes(proximaLista);
+    localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(proximaLista));
     setInspecaoAtualId(objeto.id);
-    setMensagemBase(`Inspeção salva online: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
+
+    try {
+      await salvarInspecaoFirebase(prepararInspecaoParaFirebase(objeto));
+      setMensagemBase(`Inspeção salva e sincronizada: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
+    } catch (erro) {
+      console.error(erro);
+      setMensagemBase(`Inspeção salva localmente. Quando a internet voltar, salve novamente para sincronizar: ${mensagemErroFirebase(erro)}`);
+      alert(`A inspeção foi salva no aparelho, mas não sincronizou online agora: ${mensagemErroFirebase(erro)}`);
+    }
+
     return objeto;
   }
 
-  function novaInspecao() {
+  async function novaInspecao() {
     const possuiConteudo =
       configAerodromo.icao ||
       configAerodromo.nomeAerodromo ||
@@ -2170,7 +2182,7 @@ export default function App() {
     if (possuiConteudo) {
       const deveSalvar = window.confirm("Deseja salvar a inspeção atual antes de iniciar uma nova?");
       if (deveSalvar) {
-        const salva = salvarInspecaoAtual();
+        const salva = await salvarInspecaoAtual();
         if (!salva) return;
       }
     }
@@ -2185,13 +2197,20 @@ export default function App() {
   }
 
   function abrirInspecao(inspecao) {
-    setInspecaoAtualId(inspecao.id);
-    setConfigAerodromo({ ...CONFIG_INICIAL, ...(inspecao.configAerodromo || {}) });
-    setIcao(inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "");
-    setRespostasPorNorma(reconstruirRespostasPorNorma(inspecao));
-    setNormaSelecionada("RBAC153");
-    setMensagemBase(`Inspeção aberta: ${inspecao.aeroporto?.nome || "Aeródromo"}.`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    try {
+      const configSalva = inspecao?.configAerodromo || {};
+      const aeroportoSalvo = inspecao?.aeroporto || {};
+      setInspecaoAtualId(inspecao.id);
+      setConfigAerodromo({ ...CONFIG_INICIAL, ...configSalva });
+      setIcao(aeroportoSalvo.icao || configSalva.icao || "");
+      setRespostasPorNorma(reconstruirRespostasPorNorma(inspecao));
+      setNormaSelecionada("RBAC153");
+      setMensagemBase(`Inspeção aberta: ${aeroportoSalvo.nome || configSalva.nomeAerodromo || "Aeródromo"}.`);
+      rolarParaConsultaICAO();
+    } catch (erro) {
+      console.error("Erro ao abrir inspeção:", erro);
+      alert("Não foi possível abrir esta inspeção. O registro pode estar incompleto ou corrompido.");
+    }
   }
 
   function duplicarInspecao(inspecao) {
@@ -3073,7 +3092,7 @@ export default function App() {
 
     try {
       setGerandoRelatorio(true);
-      if (configAerodromo.icao || configAerodromo.nomeAerodromo) salvarInspecaoAtual();
+      if (configAerodromo.icao || configAerodromo.nomeAerodromo) await salvarInspecaoAtual();
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "Velox Service";
@@ -3276,7 +3295,7 @@ export default function App() {
 
     try {
       setGerandoRelatorio(true);
-      if (configAerodromo.icao || configAerodromo.nomeAerodromo) salvarInspecaoAtual();
+      if (configAerodromo.icao || configAerodromo.nomeAerodromo) await salvarInspecaoAtual();
 
       const doc = new jsPDF("p", "mm", "a4");
       const largura = doc.internal.pageSize.getWidth();
@@ -3677,9 +3696,18 @@ export default function App() {
               {minhasInspecoes.map((inspecao) => (
                 <article className={inspecaoAtualId === inspecao.id ? "inspection-row active" : "inspection-row"} key={inspecao.id}>
                   <div>
-                    <strong>{inspecao.aeroporto?.nome || "Aeródromo não informado"}</strong>
-                    <span>{inspecao.aeroporto?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || "—"}/{inspecao.aeroporto?.uf || "—"}</span>
-                    <small>Atualizada em {dataBR(inspecao.atualizadoEm)} • Inspetor: {inspecao.inspetorNome}</small>
+                    {isMobileVCP ? (
+                      <>
+                        <strong style={{ fontSize: 22, letterSpacing: 1 }}>{inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "SEM ICAO"}</strong>
+                        <small>Atualizada em {dataBR(inspecao.atualizadoEm)}</small>
+                      </>
+                    ) : (
+                      <>
+                        <strong>{inspecao.aeroporto?.nome || "Aeródromo não informado"}</strong>
+                        <span>{inspecao.aeroporto?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || "—"}/{inspecao.aeroporto?.uf || "—"}</span>
+                        <small>Atualizada em {dataBR(inspecao.atualizadoEm)} • Inspetor: {inspecao.inspetorNome}</small>
+                      </>
+                    )}
                   </div>
                   <div className="inspection-progress">
                     <b>{inspecao.percentualConcluido || 0}%</b>
@@ -3807,7 +3835,7 @@ export default function App() {
           </section>
         )}
 
-        <section className="card consulta-card">
+        <section id="consulta-icao-section" className="card consulta-card">
           <div className="grid">
             <div className="col-8">
               <h2 className="card-title">Consulta automática por ICAO</h2>
@@ -4233,8 +4261,7 @@ export default function App() {
                 <div className="grid field-grid">
                   <div className="col-6"><label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label></div>
                   <div className="col-6"><label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label></div>
-                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><label className="upload-evidencia">Tirar foto ou anexar imagem<input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} /></label>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} /><button type="button" onClick={() => salvarEvidenciaNoDispositivo(ev)}>Salvar foto no dispositivo</button>
-                      <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
+                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><label className="upload-evidencia">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label><label className="upload-evidencia">🖼 Anexar da galeria<input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label></div>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />{ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}<button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
                   <div className="col-12"><label>Observações de campo<textarea value={resposta.obs || ""} onChange={(e) => atualizarResposta(item, "obs", e.target.value)} placeholder="Observações, evidências coletadas, pendências ou recomendações..." /></label></div>
                 </div>
               </article>

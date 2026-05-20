@@ -80,6 +80,20 @@ export async function enviarEvidenciaParaStorage({
     throw new Error("Arquivo de imagem não informado.");
   }
 
+  if (arquivo.type && !String(arquivo.type).startsWith("image/")) {
+    throw new Error("O arquivo selecionado não é uma imagem.");
+  }
+
+  // Proteção para documentos Firestore/relatórios e conexões móveis fracas.
+  // 12 MB ainda permite fotos de celular, mas evita travar o upload em campo.
+  if (arquivo.size && arquivo.size > 12 * 1024 * 1024) {
+    throw new Error("Imagem muito grande. Reduza a foto ou selecione uma imagem de até 12 MB.");
+  }
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw new Error("Sem internet no momento. A imagem ficará salva localmente até nova sincronização.");
+  }
+
   const storagePath = montarCaminhoEvidenciaStorage({
     usuario,
     inspecaoId,
@@ -138,8 +152,8 @@ export async function excluirEvidenciaDoStorage(storagePath) {
 
 export function obterUrlImagemEvidencia(evidencia) {
   return (
-    evidencia?.data ||
     evidencia?.previewLocal ||
+    evidencia?.data ||
     evidencia?.base64 ||
     evidencia?.downloadURL ||
     evidencia?.url ||
