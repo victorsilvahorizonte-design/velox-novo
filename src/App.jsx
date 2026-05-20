@@ -1048,6 +1048,25 @@ export default function App() {
     }
   }, [usuarioLogado]);
 
+  // AUTOSSALVAMENTO V3 VELOX
+  // Salva automaticamente a inspeção a cada 60 segundos quando houver usuário logado
+  // e aeródromo carregado. Mantém sincronização celular ↔ PC via Firebase.
+  useEffect(() => {
+    if (!usuarioLogado) return;
+    if (!configAerodromo?.icao && !configAerodromo?.nomeAerodromo) return;
+
+    const timerAutoSave = window.setInterval(() => {
+      try {
+        salvarInspecaoAtual();
+      } catch (erro) {
+        console.warn("Autossalvamento não executado:", erro);
+      }
+    }, 60000);
+
+    return () => window.clearInterval(timerAutoSave);
+  }, [usuarioLogado, configAerodromo, respostasPorNorma, inspecaoAtualId]);
+
+
   async function carregarBaseSeNecessario() {
     if (baseANAC.length > 0) return baseANAC;
 
@@ -1466,6 +1485,11 @@ export default function App() {
                   <span>Ruim</span>
                   <span>Ótimo</span>
                 </div>
+                {nota > 0 && (
+                  <div style={{ marginTop: 10, fontWeight: 900, color: statusAtual === "CONFORME" ? "#16a34a" : "#ef4444" }}>
+                    Resultado automático: {statusAtual}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1528,6 +1552,7 @@ export default function App() {
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
+                      <button type="button" onClick={() => salvarEvidenciaNoDispositivo(ev)}>Salvar foto no dispositivo</button>
                       <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
                     </div>
                   ))}
@@ -1609,6 +1634,11 @@ export default function App() {
                   <span>Ruim</span>
                   <span>Ótimo</span>
                 </div>
+                {nota > 0 && (
+                  <div style={{ marginTop: 10, fontWeight: 900, color: statusAtual === "CONFORME" ? "#16a34a" : "#ef4444" }}>
+                    Resultado automático: {statusAtual}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1671,6 +1701,7 @@ export default function App() {
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
+                      <button type="button" onClick={() => salvarEvidenciaNoDispositivo(ev)}>Salvar foto no dispositivo</button>
                       <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
                     </div>
                   ))}
@@ -1885,6 +1916,32 @@ export default function App() {
         console.error("Erro upload Firebase Storage:", erro);
         alert("Erro ao enviar imagem para Firebase Storage.");
       }
+    }
+  }
+
+  function salvarEvidenciaNoDispositivo(evidencia) {
+    try {
+      const fonte = obterUrlImagemEvidencia(evidencia);
+      if (!fonte) {
+        alert("Imagem não disponível para salvar.");
+        return;
+      }
+
+      const nomeArquivo =
+        evidencia?.nome ||
+        `evidencia-${evidencia?.id || Date.now()}.jpg`;
+
+      const link = document.createElement("a");
+      link.href = fonte;
+      link.download = nomeArquivo;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (erro) {
+      console.error("Erro ao salvar imagem no dispositivo:", erro);
+      alert("Não foi possível salvar a imagem no dispositivo.");
     }
   }
 
@@ -4176,7 +4233,8 @@ export default function App() {
                 <div className="grid field-grid">
                   <div className="col-6"><label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label></div>
                   <div className="col-6"><label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label></div>
-                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><label className="upload-evidencia">Tirar foto ou anexar imagem<input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} /></label>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} /><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
+                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><label className="upload-evidencia">Tirar foto ou anexar imagem<input type="file" accept="image/*" multiple onChange={(e) => adicionarEvidencias(item, e.target.files)} /></label>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} /><button type="button" onClick={() => salvarEvidenciaNoDispositivo(ev)}>Salvar foto no dispositivo</button>
+                      <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
                   <div className="col-12"><label>Observações de campo<textarea value={resposta.obs || ""} onChange={(e) => atualizarResposta(item, "obs", e.target.value)} placeholder="Observações, evidências coletadas, pendências ou recomendações..." /></label></div>
                 </div>
               </article>
