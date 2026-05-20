@@ -451,6 +451,56 @@ function gerarIdEvidencia(index) {
   return `EV-${String(index + 1).padStart(3, "0")}`;
 }
 
+
+function obterTimestampInspecao(inspecao = {}) {
+  return new Date(inspecao.atualizadoEm || inspecao.criadoEm || 0).getTime() || 0;
+}
+
+function mesclarInspecoesPorAtualizacao(...listas) {
+  const mapa = new Map();
+  listas.flat().filter(Boolean).forEach((inspecao) => {
+    if (!inspecao?.id) return;
+    const existente = mapa.get(inspecao.id);
+    if (!existente || obterTimestampInspecao(inspecao) >= obterTimestampInspecao(existente)) {
+      mapa.set(inspecao.id, inspecao);
+    }
+  });
+  return Array.from(mapa.values()).sort((a, b) => obterTimestampInspecao(b) - obterTimestampInspecao(a));
+}
+
+function rolarParaConsultaICAO() {
+  if (typeof window === "undefined") return;
+  window.setTimeout(() => {
+    const alvo = document.getElementById("consulta-icao-section") || document.querySelector(".consulta-card");
+    if (alvo?.scrollIntoView) alvo.scrollIntoView({ behavior: "smooth", block: "start" });
+    else window.scrollTo({ top: 0, behavior: "smooth" });
+  }, 250);
+}
+
+function limparInputArquivo(evento) {
+  if (evento?.target) evento.target.value = "";
+}
+
+function baixarEvidenciaNoDispositivo(evidencia, nomePadrao = "evidencia-velox.jpg") {
+  const fonte = obterUrlImagemEvidencia(evidencia);
+  if (!fonte || typeof document === "undefined") {
+    alert("Imagem não disponível para salvar neste dispositivo.");
+    return;
+  }
+  try {
+    const link = document.createElement("a");
+    link.href = fonte;
+    link.download = evidencia?.nome || nomePadrao;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (erro) {
+    console.error("Erro ao salvar imagem no dispositivo:", erro);
+    window.open(fonte, "_blank", "noopener,noreferrer");
+  }
+}
+
 async function urlParaBase64(url) {
   const resposta = await fetch(url);
   const blob = await resposta.blob();
@@ -676,44 +726,6 @@ function reconstruirRespostasPorNorma(inspecao) {
 
   return reconstruido;
 }
-
-
-function obterTimestampInspecao(inspecao = {}) {
-  return new Date(inspecao.atualizadoEm || inspecao.criadoEm || 0).getTime() || 0;
-}
-
-function mesclarInspecoesPorAtualizacao(...listas) {
-  const mapa = new Map();
-
-  listas.flat().filter(Boolean).forEach((inspecao) => {
-    if (!inspecao?.id) return;
-    const existente = mapa.get(inspecao.id);
-    if (!existente || obterTimestampInspecao(inspecao) >= obterTimestampInspecao(existente)) {
-      mapa.set(inspecao.id, inspecao);
-    }
-  });
-
-  return Array.from(mapa.values()).sort(
-    (a, b) => obterTimestampInspecao(b) - obterTimestampInspecao(a)
-  );
-}
-
-function rolarParaConsultaICAO() {
-  if (typeof window === "undefined") return;
-  window.setTimeout(() => {
-    const alvo = document.getElementById("consulta-icao-section") || document.querySelector(".consulta-card");
-    if (alvo?.scrollIntoView) {
-      alvo.scrollIntoView({ behavior: "smooth", block: "start" });
-    } else {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }, 250);
-}
-
-function limparInputArquivo(evento) {
-  if (evento?.target) evento.target.value = "";
-}
-
 
 function prepararInspecaoParaFirebase(objeto) {
   const limpo = sanitizarObjetoFirebase(objeto);
@@ -1572,10 +1584,10 @@ export default function App() {
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
                       <img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />
-                      {ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
+                      <button type="button" onClick={() => baixarEvidenciaNoDispositivo(ev, `${configAerodromo.icao || "VELOX"}-${chave}-${indexEv + 1}.jpg`)}>Salvar foto no celular</button>
                       <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
                     </div>
                   ))}
@@ -1722,10 +1734,10 @@ export default function App() {
                   {resposta.evidenciasAnexadas.map((ev, indexEv) => (
                     <div className="preview-card" key={`${ev.nome}-${indexEv}`}>
                       <img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />
-                      {ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}
                       {ev.latitude && ev.longitude && (
                         <small>GPS: {Number(ev.latitude).toFixed(5)}, {Number(ev.longitude).toFixed(5)}</small>
                       )}
+                      <button type="button" onClick={() => baixarEvidenciaNoDispositivo(ev, `${configAerodromo.icao || "VELOX"}-${chave}-${indexEv + 1}.jpg`)}>Salvar foto no celular</button>
                       <button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button>
                     </div>
                   ))}
@@ -1897,7 +1909,7 @@ export default function App() {
           arquivo,
           usuario: usuarioLogado,
           inspecaoId: inspecaoAtualId || `TEMP-${Date.now()}`,
-          icao: configAerodromo?.icao || "SEMICAO",
+          icao: configAerodromo.icao || icao || "SEM-ICAO",
           normaId: normaSelecionada,
           itemId: chave,
           previewLocal: previewBase64,
@@ -1910,7 +1922,7 @@ export default function App() {
         });
       } catch (erro) {
         erroUpload = erro;
-        console.warn("Imagem mantida localmente; upload online será feito em novo salvamento/conexão:", erro);
+        console.warn("Imagem mantida no aparelho; upload online falhou:", erro);
       }
 
       const evidenciaNova = {
@@ -1925,7 +1937,7 @@ export default function App() {
         url: uploadResultado?.downloadURL || uploadResultado?.url || "",
         imagemSalvaOnline: Boolean(uploadResultado?.downloadURL || uploadResultado?.storagePath),
         pendenteUpload: Boolean(erroUpload),
-        erroUpload: erroUpload ? mensagemErroFirebase?.(erroUpload) || String(erroUpload?.message || erroUpload) : "",
+        erroUpload: erroUpload ? mensagemErroFirebase(erroUpload) : "",
         criadoEm: agora,
         capturadoEm: agora,
         enviadoEm: uploadResultado?.enviadoEm || "",
@@ -2166,7 +2178,7 @@ export default function App() {
       setMensagemBase(`Inspeção salva e sincronizada: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
     } catch (erro) {
       console.error(erro);
-      setMensagemBase(`Inspeção salva localmente. Quando a internet voltar, salve novamente para sincronizar: ${mensagemErroFirebase(erro)}`);
+      setMensagemBase(`Inspeção salva neste aparelho, mas ainda não sincronizada online: ${mensagemErroFirebase(erro)}`);
       alert(`A inspeção foi salva no aparelho, mas não sincronizou online agora: ${mensagemErroFirebase(erro)}`);
     }
 
@@ -4261,7 +4273,7 @@ export default function App() {
                 <div className="grid field-grid">
                   <div className="col-6"><label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label></div>
                   <div className="col-6"><label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label></div>
-                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><label className="upload-evidencia">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label><label className="upload-evidencia">🖼 Anexar da galeria<input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label></div>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />{ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}<button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
+                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><label className="upload-evidencia">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label><label className="upload-evidencia">🖼 Anexar da galeria<input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label></div>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />{ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}<button type="button" onClick={() => baixarEvidenciaNoDispositivo(ev, `${configAerodromo.icao || "VELOX"}-${chave}-${indexEv + 1}.jpg`)}>Salvar foto no celular</button><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
                   <div className="col-12"><label>Observações de campo<textarea value={resposta.obs || ""} onChange={(e) => atualizarResposta(item, "obs", e.target.value)} placeholder="Observações, evidências coletadas, pendências ou recomendações..." /></label></div>
                 </div>
               </article>
