@@ -68,6 +68,13 @@ export async function enviarEvidenciaParaStorage({
   icao,
   normaId,
   itemId,
+  previewLocal = "",
+  geolocalizacao = null,
+  latitude = null,
+  longitude = null,
+  precisaoGPS = null,
+  linkMaps = "",
+  responsavel = "",
 }) {
   if (!arquivo) {
     throw new Error("Arquivo de imagem não informado.");
@@ -101,8 +108,18 @@ export async function enviarEvidenciaParaStorage({
   return {
     storagePath,
     downloadURL,
+    url: downloadURL,
+    data: previewLocal || "",
+    previewLocal: previewLocal || "",
     imagemSalvaOnline: true,
     enviadoEm: dataAgoraISO(),
+    geolocalizacao: geolocalizacao || null,
+    latitude: latitude ?? geolocalizacao?.latitude ?? null,
+    longitude: longitude ?? geolocalizacao?.longitude ?? null,
+    precisaoGPS: precisaoGPS ?? geolocalizacao?.precisao ?? null,
+    precisao: precisaoGPS ?? geolocalizacao?.precisao ?? null,
+    linkMaps: linkMaps || geolocalizacao?.linkMaps || "",
+    responsavel: responsavel || usuario?.nomeCompleto || usuario?.email || "",
   };
 }
 
@@ -123,6 +140,7 @@ export function obterUrlImagemEvidencia(evidencia) {
   return (
     evidencia?.data ||
     evidencia?.previewLocal ||
+    evidencia?.base64 ||
     evidencia?.downloadURL ||
     evidencia?.url ||
     ""

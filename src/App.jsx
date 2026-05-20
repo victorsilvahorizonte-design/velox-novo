@@ -484,6 +484,43 @@ async function prepararImagemParaRelatorio(imagem) {
   }
 }
 
+
+function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, itemId = "") {
+  const data = imagem?.data || imagem?.previewLocal || imagem?.base64 || "";
+  const url = imagem?.downloadURL || imagem?.url || "";
+  const geolocalizacao = imagem?.geolocalizacao || null;
+  const latitude = imagem?.latitude ?? geolocalizacao?.latitude ?? null;
+  const longitude = imagem?.longitude ?? geolocalizacao?.longitude ?? null;
+  const precisaoGPS =
+    imagem?.precisaoGPS ??
+    imagem?.precisao ??
+    geolocalizacao?.precisao ??
+    null;
+
+  return {
+    ...imagem,
+    data: data || url,
+    previewLocal: imagem?.previewLocal || data || "",
+    downloadURL: imagem?.downloadURL || url || "",
+    url: url || data || "",
+    storagePath: imagem?.storagePath || "",
+    imagemSalvaOnline: Boolean(imagem?.imagemSalvaOnline || url || imagem?.storagePath),
+    geolocalizacao,
+    latitude,
+    longitude,
+    precisaoGPS,
+    precisao: imagem?.precisao ?? precisaoGPS,
+    linkMaps:
+      imagem?.linkMaps ||
+      geolocalizacao?.linkMaps ||
+      (latitude && longitude ? `https://www.google.com/maps?q=${latitude},${longitude}` : ""),
+    capturadoEm: imagem?.capturadoEm || imagem?.criadoEm || "",
+    criadoEm: imagem?.criadoEm || imagem?.capturadoEm || "",
+    responsavel: imagem?.responsavel || resposta?.responsavel || "",
+    itemVinculado: imagem?.itemVinculado || itemId || "",
+  };
+}
+
 function corStatus(status) {
   if (status === "CONFORME") return "16A34A";
   if (status === "NÃO CONFORME") return "EF4444";
@@ -1796,6 +1833,13 @@ export default function App() {
           icao: configAerodromo?.icao || "SEMICAO",
           normaId: normaSelecionada,
           itemId: chave,
+          previewLocal: previewBase64,
+          geolocalizacao,
+          latitude: geolocalizacao?.latitude ?? null,
+          longitude: geolocalizacao?.longitude ?? null,
+          precisaoGPS: geolocalizacao?.precisao ?? null,
+          linkMaps: geolocalizacao?.linkMaps || "",
+          responsavel: usuarioLogado?.nomeCompleto || "",
         });
 
         setRespostasPorNorma((prev) => {
@@ -1817,9 +1861,10 @@ export default function App() {
                     tamanho: arquivo.size,
                     data: previewBase64,
                     previewLocal: previewBase64,
-                    storagePath: uploadResultado.storagePath,
-                    downloadURL: uploadResultado.downloadURL,
-                    imagemSalvaOnline: true,
+                    storagePath: uploadResultado.storagePath || "",
+                    downloadURL: uploadResultado.downloadURL || "",
+                    url: uploadResultado.downloadURL || uploadResultado.url || "",
+                    imagemSalvaOnline: Boolean(uploadResultado.downloadURL || uploadResultado.storagePath),
                     criadoEm: agora,
                     capturadoEm: agora,
                     enviadoEm: uploadResultado.enviadoEm || agora,
@@ -1957,9 +2002,17 @@ export default function App() {
         const chave = item.id || item.ref;
         const resposta = respostasNorma[chave] || {};
         const status = resposta.status || "NÃO VERIFICADO";
-        const imagens = resposta.evidenciasAnexadas || [];
+        const imagens = Array.isArray(resposta.evidenciasAnexadas)
+          ? resposta.evidenciasAnexadas
+          : [];
 
-        imagens.forEach((imagem) => {
+        imagens.forEach((imagemOriginal) => {
+          const imagem = normalizarImagemEvidenciaParaRelatorio(
+            imagemOriginal,
+            resposta,
+            chave
+          );
+
           lista.push({
             id: gerarIdEvidencia(lista.length),
             normaId,
@@ -1972,6 +2025,17 @@ export default function App() {
             classificacaoVCP: resposta.classificacaoVCP || "",
             status,
             imagem,
+            data: imagem.data || imagem.previewLocal || imagem.downloadURL || imagem.url || "",
+            url: imagem.downloadURL || imagem.url || imagem.data || imagem.previewLocal || "",
+            downloadURL: imagem.downloadURL || imagem.url || "",
+            previewLocal: imagem.previewLocal || imagem.data || "",
+            geolocalizacao: imagem.geolocalizacao || null,
+            latitude: imagem.latitude ?? null,
+            longitude: imagem.longitude ?? null,
+            precisaoGPS: imagem.precisaoGPS ?? null,
+            linkMaps: imagem.linkMaps || "",
+            capturadoEm: imagem.capturadoEm || imagem.criadoEm || "",
+            responsavel: imagem.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
           });
         });
       });
@@ -2397,10 +2461,21 @@ export default function App() {
 
   function montarEvidenciasVCP() {
     const lista = [];
+
     obterItensVCPParaRelatorio().forEach((item) => {
       const chave = item.id || item.ref;
       const resposta = respostasPorNorma.VCP?.[chave] || {};
-      (resposta.evidenciasAnexadas || []).forEach((imagem) => {
+      const imagens = Array.isArray(resposta.evidenciasAnexadas)
+        ? resposta.evidenciasAnexadas
+        : [];
+
+      imagens.forEach((imagemOriginal) => {
+        const imagem = normalizarImagemEvidenciaParaRelatorio(
+          imagemOriginal,
+          resposta,
+          chave
+        );
+
         lista.push({
           id: gerarIdEvidencia(lista.length),
           normaId: "VCP",
@@ -2413,16 +2488,21 @@ export default function App() {
           classificacaoVCP: resposta.classificacaoVCP || "",
           status: resposta.status || "NÃO VERIFICADO",
           imagem,
+          data: imagem.data || imagem.previewLocal || imagem.downloadURL || imagem.url || "",
+          url: imagem.downloadURL || imagem.url || imagem.data || imagem.previewLocal || "",
+          downloadURL: imagem.downloadURL || imagem.url || "",
+          previewLocal: imagem.previewLocal || imagem.data || "",
           geolocalizacao: imagem.geolocalizacao || null,
-          latitude: imagem.latitude ?? imagem.geolocalizacao?.latitude ?? null,
-          longitude: imagem.longitude ?? imagem.geolocalizacao?.longitude ?? null,
-          precisaoGPS: imagem.precisaoGPS ?? imagem.geolocalizacao?.precisao ?? null,
-          linkMaps: imagem.linkMaps || imagem.geolocalizacao?.linkMaps || "",
+          latitude: imagem.latitude ?? null,
+          longitude: imagem.longitude ?? null,
+          precisaoGPS: imagem.precisaoGPS ?? null,
+          linkMaps: imagem.linkMaps || "",
           capturadoEm: imagem.capturadoEm || imagem.criadoEm || "",
           responsavel: imagem.responsavel || resposta.responsavel || usuarioLogado?.nomeCompleto || "",
         });
       });
     });
+
     return lista;
   }
 
@@ -3279,7 +3359,9 @@ export default function App() {
           const textoItem = item.item || item.titulo || item.descricao || "Item de inspeção";
           const condicaoAtual = resposta.condicaoAtual || "-";
           const obs = resposta.obs || "-";
-          const primeiraFoto = resposta.evidenciasAnexadas?.[0];
+          const primeiraFoto = Array.isArray(resposta.evidenciasAnexadas)
+            ? normalizarImagemEvidenciaParaRelatorio(resposta.evidenciasAnexadas[0], resposta, chave)
+            : null;
 
           if (y > 250) {
             doc.addPage();
@@ -3314,7 +3396,7 @@ export default function App() {
               doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 92 : 160), 16, y + 44);
             }
 
-            if (primeiraFoto?.data) {
+            if (primeiraFoto?.data && String(primeiraFoto.data).startsWith("data:image")) {
               try {
                 const formato = extensaoImagem(primeiraFoto.data) === "png" ? "PNG" : "JPEG";
                 doc.addImage(primeiraFoto.data, formato, 124, y + 7, 58, 40);
