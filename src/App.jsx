@@ -497,6 +497,90 @@ function filtrarInspecoesValidas(lista = []) {
   return lista.map(normalizarInspecaoSegura).filter(Boolean);
 }
 
+
+
+function removerConteudoPesadoImagem(evidencia = {}) {
+  if (!evidencia || typeof evidencia !== "object") return evidencia;
+  const urlOnline = evidencia.downloadURL || evidencia.url || "";
+  return {
+    ...evidencia,
+    // Nunca gravar base64/dataURL no localStorage. Em celular isso estoura a quota
+    // e causa tela branca/falha no salvamento. A imagem online fica pelo downloadURL.
+    data: String(evidencia.data || "").startsWith("data:image") ? "" : evidencia.data || "",
+    previewLocal: String(evidencia.previewLocal || "").startsWith("data:image") ? "" : evidencia.previewLocal || "",
+    base64: "",
+    downloadURL: evidencia.downloadURL || urlOnline || "",
+    url: urlOnline || "",
+  };
+}
+
+function criarRespostasLevesParaArmazenamentoLocal(respostasOriginais = {}) {
+  const saida = criarRespostasNormas();
+
+  NORMAS_IDS.forEach((normaId) => {
+    const respostasNorma = respostasOriginais?.[normaId] || {};
+    saida[normaId] = {};
+
+    Object.entries(respostasNorma).forEach(([chave, resposta]) => {
+      const respostaLeve = { ...(resposta || {}) };
+      if (Array.isArray(respostaLeve.evidenciasAnexadas)) {
+        respostaLeve.evidenciasAnexadas = respostaLeve.evidenciasAnexadas.map(removerConteudoPesadoImagem);
+      }
+      saida[normaId][chave] = respostaLeve;
+    });
+  });
+
+  return saida;
+}
+
+function criarInspecaoLeveParaStorage(inspecao = {}) {
+  if (!inspecao || typeof inspecao !== "object") return inspecao;
+  const respostasLeves = criarRespostasLevesParaArmazenamentoLocal(
+    reconstruirRespostasPorNorma(inspecao)
+  );
+
+  return {
+    ...inspecao,
+    respostasPorNorma: respostasLeves,
+    normas: undefined,
+    respostasPorNormaLista: undefined,
+  };
+}
+
+function gravarInspecoesLocalSeguro(lista = []) {
+  try {
+    const validas = filtrarInspecoesValidas(lista).map(criarInspecaoLeveParaStorage);
+    localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(validas));
+    return true;
+  } catch (erro) {
+    console.warn("Não foi possível gravar inspeções completas no localStorage. Gravando resumo leve.", erro);
+    try {
+      const resumoMinimo = filtrarInspecoesValidas(lista).map((insp) => ({
+        id: insp.id,
+        usuarioId: insp.usuarioId || "",
+        inspetorNome: insp.inspetorNome || "",
+        aeroporto: insp.aeroporto || criarSnapshotAeroporto(insp.configAerodromo || {}),
+        configAerodromo: insp.configAerodromo || {},
+        criadoEm: insp.criadoEm || "",
+        atualizadoEm: insp.atualizadoEm || "",
+        statusGeral: insp.statusGeral || "em_andamento",
+        percentualConcluido: Number(insp.percentualConcluido || 0),
+        totalItens: Number(insp.totalItens || 0),
+        totalNaoConformidades: Number(insp.totalNaoConformidades || 0),
+        pendenteSync: Boolean(insp.pendenteSync),
+        sincronizadoOnline: Boolean(insp.sincronizadoOnline),
+        ultimoErroSync: insp.ultimoErroSync || "",
+        respostasPorNorma: criarRespostasNormas(),
+      }));
+      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(resumoMinimo));
+      return true;
+    } catch (erroResumo) {
+      console.error("Quota localStorage excedida mesmo com resumo mínimo.", erroResumo);
+      return false;
+    }
+  }
+}
+
 function lerFilaSyncLocal() {
   return filtrarInspecoesValidas(
     safeParse(localStorage.getItem(STORAGE_KEYS.inspecoesPendentesSync), [])
@@ -505,7 +589,7 @@ function lerFilaSyncLocal() {
 
 function gravarFilaSyncLocal(lista = []) {
   const validas = filtrarInspecoesValidas(lista);
-  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
+  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas.map(criarInspecaoLeveParaStorage)));
   return validas;
 }
 
@@ -1141,7 +1225,7 @@ export default function App() {
         const pendentes = lerFilaSyncLocal();
         const mescladas = mesclarInspecoesPorAtualizacao(local, online, pendentes);
         setInspecoes(mescladas);
-        localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(mescladas));
+        gravarInspecoesLocalSeguro(mescladas);
       } catch (erro) {
         console.error("Erro ao receber inspeções do Firebase:", erro);
         const local = filtrarInspecoesValidas(safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []));
@@ -1176,7 +1260,7 @@ export default function App() {
   }, [usuarios]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(inspecoes));
+    gravarInspecoesLocalSeguro(inspecoes);
   }, [inspecoes]);
 
   useEffect(() => {
@@ -2305,7 +2389,7 @@ export default function App() {
                 : insp
             )
           );
-          localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(atualizada));
+          gravarInspecoesLocalSeguro(atualizada);
           return atualizada;
         });
       } catch (erro) {
@@ -2359,7 +2443,7 @@ export default function App() {
       const proximaLista = mesclarInspecoesPorAtualizacao([objeto], locaisAtuais, inspecoes);
 
       setInspecoes(proximaLista);
-      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(proximaLista));
+      gravarInspecoesLocalSeguro(proximaLista);
       localStorage.setItem(STORAGE_KEYS.ultimoAutosave, new Date().toISOString());
       setInspecaoAtualId(objeto.id);
 
@@ -2386,7 +2470,7 @@ export default function App() {
 
         const listaSincronizada = mesclarInspecoesPorAtualizacao([sincronizado], proximaLista);
         setInspecoes(listaSincronizada);
-        localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(listaSincronizada));
+        gravarInspecoesLocalSeguro(listaSincronizada);
 
         setMensagemBase(
           origem === "autosave"
@@ -2475,7 +2559,7 @@ export default function App() {
     };
     setInspecoes((prev) => {
       const lista = mesclarInspecoesPorAtualizacao([copia], prev);
-      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(lista));
+      gravarInspecoesLocalSeguro(lista);
       return lista;
     });
     salvarInspecaoFirebase(prepararInspecaoParaFirebase(copia)).catch((erro) => {
@@ -2543,7 +2627,7 @@ export default function App() {
       );
 
       setInspecoes([]);
-      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify([]));
+      gravarInspecoesLocalSeguro([]);
       setInspecaoAtualId(null);
       setRespostasPorNorma(criarRespostasNormas());
       setMensagemBase("Limpeza total concluída. Todas as inspeções foram excluídas. Usuários preservados.");
