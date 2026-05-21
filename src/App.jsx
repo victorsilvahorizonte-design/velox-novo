@@ -4136,7 +4136,7 @@ export default function App() {
                     )}
                   </div>
                   <div className="inspection-progress">
-                    <b>{inspecao.percentualConcluido || 0}%</b>
+                    <b>{inspecao.percentualConcluido || 0}% • {inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "SEM ICAO"}</b>
                     <small>{inspecao.statusGeral === "concluida" ? "Concluída" : "Em andamento"}</small>
                   </div>
                   <div className="inspection-actions">
