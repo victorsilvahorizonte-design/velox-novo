@@ -63,6 +63,8 @@ const STORAGE_KEYS = {
   usuarios: "velox_usuarios",
   usuarioLogado: "velox_usuario_logado",
   inspecoes: "velox_inspecoes",
+  inspecoesPendentesSync: "velox_inspecoes_pendentes_sync",
+  ultimoAutosave: "velox_ultimo_autosave",
   baseANAC: "baseANAC",
 };
 
@@ -449,6 +451,83 @@ function classeStatus(status) {
 
 function gerarIdEvidencia(index) {
   return `EV-${String(index + 1).padStart(3, "0")}`;
+}
+
+
+function normalizarInspecaoSegura(inspecao = {}) {
+  if (!inspecao || typeof inspecao !== "object") return null;
+  if (!inspecao.id) return null;
+
+  const agora = new Date().toISOString();
+  const aeroporto = inspecao.aeroporto || {};
+  const config = inspecao.configAerodromo || {};
+
+  return {
+    ...inspecao,
+    id: String(inspecao.id),
+    usuarioId: inspecao.usuarioId || "",
+    inspetorNome: inspecao.inspetorNome || "",
+    aeroporto: {
+      icao: aeroporto.icao || config.icao || "",
+      nome: aeroporto.nome || config.nomeAerodromo || "Aeródromo não informado",
+      municipio: aeroporto.municipio || config.municipio || "",
+      uf: aeroporto.uf || config.uf || "",
+      classificacao153: aeroporto.classificacao153 || config.classificacaoRBAC153 || config.classeRBAC153 || "",
+      codigoNumero154: aeroporto.codigoNumero154 || config.codigoNumero || "",
+      codigoLetra154: aeroporto.codigoLetra154 || config.codigoLetra || "",
+      codigoReferencia154: aeroporto.codigoReferencia154 || config.codigoReferenciaRBAC154 || "",
+      categoria107: aeroporto.categoria107 || config.categoriaRBAC107 || "",
+    },
+    configAerodromo: { ...CONFIG_INICIAL, ...config },
+    respostasPorNorma: reconstruirRespostasPorNorma(inspecao),
+    criadoEm: inspecao.criadoEm || agora,
+    atualizadoEm: inspecao.atualizadoEm || agora,
+    statusGeral: inspecao.statusGeral || "em_andamento",
+    percentualConcluido: Number(inspecao.percentualConcluido || 0),
+    totalItens: Number(inspecao.totalItens || 0),
+    totalNaoConformidades: Number(inspecao.totalNaoConformidades || 0),
+    sincronizadoOnline: inspecao.sincronizadoOnline === true,
+    pendenteSync: inspecao.pendenteSync === true,
+    ultimoErroSync: inspecao.ultimoErroSync || "",
+  };
+}
+
+function filtrarInspecoesValidas(lista = []) {
+  if (!Array.isArray(lista)) return [];
+  return lista.map(normalizarInspecaoSegura).filter(Boolean);
+}
+
+function lerFilaSyncLocal() {
+  return filtrarInspecoesValidas(
+    safeParse(localStorage.getItem(STORAGE_KEYS.inspecoesPendentesSync), [])
+  );
+}
+
+function gravarFilaSyncLocal(lista = []) {
+  const validas = filtrarInspecoesValidas(lista);
+  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
+  return validas;
+}
+
+function adicionarInspecaoNaFilaSync(inspecao) {
+  const segura = normalizarInspecaoSegura({
+    ...inspecao,
+    pendenteSync: true,
+    sincronizadoOnline: false,
+  });
+  if (!segura) return [];
+  const atual = lerFilaSyncLocal();
+  return gravarFilaSyncLocal(mesclarInspecoesPorAtualizacao([segura], atual));
+}
+
+function removerInspecaoDaFilaSync(id) {
+  const atual = lerFilaSyncLocal();
+  return gravarFilaSyncLocal(atual.filter((insp) => insp.id !== id));
+}
+
+function navegadorEstaOnline() {
+  if (typeof navigator === "undefined") return true;
+  return navigator.onLine !== false;
 }
 
 
@@ -1056,11 +1135,19 @@ export default function App() {
     });
 
     const cancelarInspecoes = observarInspecoesFirebase((listaInspecoes) => {
-      const online = Array.isArray(listaInspecoes) ? listaInspecoes : [];
-      const local = safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []);
-      const mescladas = mesclarInspecoesPorAtualizacao(local, online);
-      setInspecoes(mescladas);
-      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(mescladas));
+      try {
+        const online = filtrarInspecoesValidas(Array.isArray(listaInspecoes) ? listaInspecoes : []);
+        const local = filtrarInspecoesValidas(safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []));
+        const pendentes = lerFilaSyncLocal();
+        const mescladas = mesclarInspecoesPorAtualizacao(local, online, pendentes);
+        setInspecoes(mescladas);
+        localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(mescladas));
+      } catch (erro) {
+        console.error("Erro ao receber inspeções do Firebase:", erro);
+        const local = filtrarInspecoesValidas(safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []));
+        setInspecoes(local);
+        setMensagemBase("Modo seguro ativado: houve falha ao ler inspeções online, mas os dados locais foram preservados.");
+      }
     });
 
     const respostasAntigas = safeParse(localStorage.getItem("respostas-inspecao"), null);
@@ -1100,6 +1187,40 @@ export default function App() {
       localStorage.removeItem(STORAGE_KEYS.usuarioLogado);
     }
   }, [usuarioLogado]);
+
+  useEffect(() => {
+    if (!usuarioLogado?.id) return;
+
+    sincronizarFilaOffline().catch((erro) => {
+      console.error("Falha na sincronização inicial da fila offline:", erro);
+    });
+
+    const aoVoltarInternet = () => {
+      setMensagemBase("Internet detectada. Sincronizando inspeções salvas offline...");
+      sincronizarFilaOffline().catch((erro) => {
+        console.error("Falha ao sincronizar após retorno da internet:", erro);
+      });
+    };
+
+    window.addEventListener("online", aoVoltarInternet);
+    return () => window.removeEventListener("online", aoVoltarInternet);
+  }, [usuarioLogado?.id]);
+
+  useEffect(() => {
+    if (!usuarioLogado?.id) return;
+
+    const timerAutosave = window.setInterval(() => {
+      const possuiAerodromo = Boolean(configAerodromo.icao || configAerodromo.nomeAerodromo);
+      if (!possuiAerodromo) return;
+
+      salvarInspecaoAtual({ silencioso: true, origem: "autosave" }).catch((erro) => {
+        console.error("Erro no autosave:", erro);
+        setMensagemBase("Autosave local realizado com proteção, mas houve falha ao sincronizar online.");
+      });
+    }, 60000);
+
+    return () => window.clearInterval(timerAutosave);
+  }, [usuarioLogado?.id, inspecaoAtualId, configAerodromo, respostasPorNorma, inspecoes]);
 
   async function carregarBaseSeNecessario() {
     if (baseANAC.length > 0) return baseANAC;
@@ -2131,8 +2252,8 @@ export default function App() {
 
     return {
       id: idExistente || gerarId("INSP"),
-      usuarioId: usuarioLogado.id,
-      inspetorNome: usuarioLogado.nomeCompleto,
+      usuarioId: usuarioLogado?.id || "",
+      inspetorNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
       aeroporto: criarSnapshotAeroporto(configAerodromo),
       configAerodromo,
       respostasPorNorma,
@@ -2155,34 +2276,148 @@ export default function App() {
     };
   }
 
-  async function salvarInspecaoAtual() {
-    if (!usuarioLogado) {
-      alert("Faça login para salvar a inspeção.");
-      return null;
+  async function sincronizarFilaOffline() {
+    if (!usuarioLogado?.id) return false;
+    if (!navegadorEstaOnline()) return false;
+
+    const fila = lerFilaSyncLocal().filter((insp) => insp.usuarioId === usuarioLogado.id);
+    if (!fila.length) return true;
+
+    const aindaPendentes = [];
+
+    for (const itemFila of fila) {
+      try {
+        const objetoOnline = prepararInspecaoParaFirebase({
+          ...itemFila,
+          pendenteSync: false,
+          sincronizadoOnline: true,
+          ultimoErroSync: "",
+        });
+
+        await salvarInspecaoFirebase(objetoOnline);
+        removerInspecaoDaFilaSync(itemFila.id);
+
+        setInspecoes((prev) => {
+          const atualizada = mesclarInspecoesPorAtualizacao(
+            prev.map((insp) =>
+              insp.id === itemFila.id
+                ? { ...insp, pendenteSync: false, sincronizadoOnline: true, ultimoErroSync: "" }
+                : insp
+            )
+          );
+          localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(atualizada));
+          return atualizada;
+        });
+      } catch (erro) {
+        console.error("Erro ao sincronizar item offline:", erro);
+        aindaPendentes.push({
+          ...itemFila,
+          pendenteSync: true,
+          sincronizadoOnline: false,
+          ultimoErroSync: mensagemErroFirebase(erro),
+        });
+      }
     }
 
-    if (!configAerodromo.icao && !configAerodromo.nomeAerodromo) {
-      alert("Informe ou carregue um aeródromo antes de salvar a inspeção.");
-      return null;
+    if (aindaPendentes.length) {
+      gravarFilaSyncLocal(mesclarInspecoesPorAtualizacao(aindaPendentes, lerFilaSyncLocal()));
+      setMensagemBase("Algumas inspeções continuam salvas offline e serão sincronizadas automaticamente quando possível.");
+      return false;
     }
 
-    const objeto = criarObjetoInspecao(inspecaoAtualId);
-    const proximaLista = mesclarInspecoesPorAtualizacao([objeto], inspecoes);
+    setMensagemBase("Inspeções offline sincronizadas com sucesso.");
+    return true;
+  }
 
-    setInspecoes(proximaLista);
-    localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(proximaLista));
-    setInspecaoAtualId(objeto.id);
+  async function salvarInspecaoAtual(opcoes = {}) {
+    const { silencioso = false, origem = "manual" } = opcoes || {};
 
     try {
-      await salvarInspecaoFirebase(prepararInspecaoParaFirebase(objeto));
-      setMensagemBase(`Inspeção salva e sincronizada: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`);
-    } catch (erro) {
-      console.error(erro);
-      setMensagemBase(`Inspeção salva neste aparelho, mas ainda não sincronizada online: ${mensagemErroFirebase(erro)}`);
-      alert(`A inspeção foi salva no aparelho, mas não sincronizou online agora: ${mensagemErroFirebase(erro)}`);
-    }
+      if (!usuarioLogado?.id) {
+        if (!silencioso) alert("Faça login para salvar a inspeção.");
+        return null;
+      }
 
-    return objeto;
+      if (!configAerodromo.icao && !configAerodromo.nomeAerodromo) {
+        if (!silencioso) alert("Informe ou carregue um aeródromo antes de salvar a inspeção.");
+        return null;
+      }
+
+      const objetoBase = criarObjetoInspecao(inspecaoAtualId);
+      const objeto = normalizarInspecaoSegura({
+        ...objetoBase,
+        pendenteSync: !navegadorEstaOnline(),
+        sincronizadoOnline: false,
+        origemUltimoSalvamento: origem,
+      });
+
+      if (!objeto) {
+        throw new Error("Não foi possível montar um objeto de inspeção válido para salvar.");
+      }
+
+      const locaisAtuais = filtrarInspecoesValidas(safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []));
+      const proximaLista = mesclarInspecoesPorAtualizacao([objeto], locaisAtuais, inspecoes);
+
+      setInspecoes(proximaLista);
+      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(proximaLista));
+      localStorage.setItem(STORAGE_KEYS.ultimoAutosave, new Date().toISOString());
+      setInspecaoAtualId(objeto.id);
+
+      if (!navegadorEstaOnline()) {
+        adicionarInspecaoNaFilaSync(objeto);
+        setMensagemBase(
+          origem === "autosave"
+            ? `Autosave offline realizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}. A sincronização ocorrerá quando a internet voltar.`
+            : `Inspeção salva offline neste aparelho: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}). Será sincronizada quando a internet voltar.`
+        );
+        return objeto;
+      }
+
+      try {
+        await salvarInspecaoFirebase(prepararInspecaoParaFirebase(objeto));
+        removerInspecaoDaFilaSync(objeto.id);
+
+        const sincronizado = {
+          ...objeto,
+          pendenteSync: false,
+          sincronizadoOnline: true,
+          ultimoErroSync: "",
+        };
+
+        const listaSincronizada = mesclarInspecoesPorAtualizacao([sincronizado], proximaLista);
+        setInspecoes(listaSincronizada);
+        localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(listaSincronizada));
+
+        setMensagemBase(
+          origem === "autosave"
+            ? `Autosave sincronizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}.`
+            : `Inspeção salva e sincronizada: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`
+        );
+      } catch (erro) {
+        console.error("Falha ao salvar online; mantendo fila offline:", erro);
+        adicionarInspecaoNaFilaSync({
+          ...objeto,
+          pendenteSync: true,
+          sincronizadoOnline: false,
+          ultimoErroSync: mensagemErroFirebase(erro),
+        });
+        setMensagemBase(
+          origem === "autosave"
+            ? "Autosave local realizado. A sincronização online ficou pendente."
+            : `Inspeção salva neste aparelho, mas ainda pendente de sincronização online: ${mensagemErroFirebase(erro)}`
+        );
+        if (!silencioso) {
+          alert(`A inspeção foi salva no aparelho. A sincronização online ficou pendente: ${mensagemErroFirebase(erro)}`);
+        }
+      }
+
+      return objeto;
+    } catch (erro) {
+      console.error("Erro crítico ao salvar inspeção:", erro);
+      setMensagemBase(`Erro ao salvar inspeção: ${erro.message || erro}`);
+      if (!silencioso) alert(`Erro ao salvar inspeção: ${erro.message || erro}`);
+      return null;
+    }
   }
 
   async function novaInspecao() {
@@ -2238,10 +2473,15 @@ export default function App() {
         nome: `${inspecao.aeroporto?.nome || "Inspeção"} - Cópia`,
       },
     };
-    setInspecoes((prev) => [copia, ...prev]);
+    setInspecoes((prev) => {
+      const lista = mesclarInspecoesPorAtualizacao([copia], prev);
+      localStorage.setItem(STORAGE_KEYS.inspecoes, JSON.stringify(lista));
+      return lista;
+    });
     salvarInspecaoFirebase(prepararInspecaoParaFirebase(copia)).catch((erro) => {
       console.error(erro);
-      alert(`Erro ao duplicar inspeção online: ${mensagemErroFirebase(erro)}`);
+      adicionarInspecaoNaFilaSync(copia);
+      alert(`Cópia salva neste aparelho, mas ficou pendente de sincronização online: ${mensagemErroFirebase(erro)}`);
     });
     setMensagemBase("Inspeção duplicada com sucesso.");
   }
