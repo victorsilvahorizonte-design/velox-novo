@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 import logoVelox from "./assets/logo-velox.png";
@@ -1134,6 +1134,47 @@ export default function App() {
   const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
   const [isMobileVCP, setIsMobileVCP] = useState(false);
 
+  // Autosave V3 VELOX — Bugs 6 e 7
+  // Mantém sempre a função de salvar mais recente disponível para o temporizador,
+  // sem reiniciar o intervalo a cada digitação.
+  const salvarInspecaoAtualRef = useRef(null);
+  const autosaveDebounceRef = useRef(null);
+  const autosaveEmExecucaoRef = useRef(false);
+  const alteracaoPendenteRef = useRef(false);
+
+  function existeInspecaoParaAutosave() {
+    return Boolean(usuarioLogado?.id && (configAerodromo.icao || configAerodromo.nomeAerodromo));
+  }
+
+  function marcarAlteracaoPendente() {
+    alteracaoPendenteRef.current = true;
+
+    if (typeof window === "undefined") return;
+    if (autosaveDebounceRef.current) {
+      window.clearTimeout(autosaveDebounceRef.current);
+    }
+
+    // Salvamento rápido de apoio após alteração, sem substituir o autosave oficial de 60s.
+    autosaveDebounceRef.current = window.setTimeout(async () => {
+      if (!existeInspecaoParaAutosave()) return;
+      if (autosaveEmExecucaoRef.current) return;
+      if (typeof salvarInspecaoAtualRef.current !== "function") return;
+
+      autosaveEmExecucaoRef.current = true;
+      try {
+        const salvo = await salvarInspecaoAtualRef.current({
+          silencioso: true,
+          origem: "autosave_debounce",
+        });
+        if (salvo) alteracaoPendenteRef.current = false;
+      } catch (erro) {
+        console.error("Falha no autosave rápido:", erro);
+      } finally {
+        autosaveEmExecucaoRef.current = false;
+      }
+    }, 10000);
+  }
+
   useEffect(() => {
     const atualizarModoMobile = () => {
       if (typeof window === "undefined") return;
@@ -1273,17 +1314,32 @@ export default function App() {
   }, [usuarioLogado]);
 
   useEffect(() => {
+    salvarInspecaoAtualRef.current = salvarInspecaoAtual;
+  });
+
+  useEffect(() => {
     if (!usuarioLogado?.id) return;
 
-    sincronizarFilaOffline().catch((erro) => {
-      console.error("Falha na sincronização inicial da fila offline:", erro);
-    });
+    async function sincronizarTudo(motivo = "online") {
+      try {
+        if (alteracaoPendenteRef.current && typeof salvarInspecaoAtualRef.current === "function" && existeInspecaoParaAutosave()) {
+          const salvo = await salvarInspecaoAtualRef.current({
+            silencioso: true,
+            origem: `autosave_${motivo}`,
+          });
+          if (salvo) alteracaoPendenteRef.current = false;
+        }
+        await sincronizarFilaOffline();
+      } catch (erro) {
+        console.error("Falha ao sincronizar:", erro);
+      }
+    }
+
+    sincronizarTudo("inicial");
 
     const aoVoltarInternet = () => {
       setMensagemBase("Internet detectada. Sincronizando inspeções salvas offline...");
-      sincronizarFilaOffline().catch((erro) => {
-        console.error("Falha ao sincronizar após retorno da internet:", erro);
-      });
+      sincronizarTudo("retorno_online");
     };
 
     window.addEventListener("online", aoVoltarInternet);
@@ -1293,18 +1349,44 @@ export default function App() {
   useEffect(() => {
     if (!usuarioLogado?.id) return;
 
-    const timerAutosave = window.setInterval(() => {
-      const possuiAerodromo = Boolean(configAerodromo.icao || configAerodromo.nomeAerodromo);
-      if (!possuiAerodromo) return;
+    async function executarAutosave60s() {
+      if (!existeInspecaoParaAutosave()) return;
+      if (autosaveEmExecucaoRef.current) return;
+      if (typeof salvarInspecaoAtualRef.current !== "function") return;
 
-      salvarInspecaoAtual({ silencioso: true, origem: "autosave" }).catch((erro) => {
-        console.error("Erro no autosave:", erro);
+      autosaveEmExecucaoRef.current = true;
+      try {
+        const salvo = await salvarInspecaoAtualRef.current({
+          silencioso: true,
+          origem: "autosave",
+        });
+        if (salvo) alteracaoPendenteRef.current = false;
+      } catch (erro) {
+        console.error("Erro no autosave de 60 segundos:", erro);
         setMensagemBase("Autosave local realizado com proteção, mas houve falha ao sincronizar online.");
-      });
-    }, 60000);
+      } finally {
+        autosaveEmExecucaoRef.current = false;
+      }
+    }
 
-    return () => window.clearInterval(timerAutosave);
-  }, [usuarioLogado?.id, inspecaoAtualId, configAerodromo, respostasPorNorma, inspecoes]);
+    const timerAutosave = window.setInterval(executarAutosave60s, 60000);
+
+    const salvarAoOcultar = () => {
+      if (document.visibilityState === "hidden" && existeInspecaoParaAutosave()) {
+        executarAutosave60s();
+      }
+    };
+
+    document.addEventListener("visibilitychange", salvarAoOcultar);
+    window.addEventListener("pagehide", executarAutosave60s);
+
+    return () => {
+      window.clearInterval(timerAutosave);
+      document.removeEventListener("visibilitychange", salvarAoOcultar);
+      window.removeEventListener("pagehide", executarAutosave60s);
+      if (autosaveDebounceRef.current) window.clearTimeout(autosaveDebounceRef.current);
+    };
+  }, [usuarioLogado?.id]);
 
   async function carregarBaseSeNecessario() {
     if (baseANAC.length > 0) return baseANAC;
@@ -1521,6 +1603,7 @@ export default function App() {
 
   function atualizarResposta(item, campo, valor) {
     const chave = item.id || item.ref;
+    marcarAlteracaoPendente();
 
     setRespostasPorNorma((prev) => ({
       ...prev,
@@ -1535,6 +1618,7 @@ export default function App() {
   }
 
   function atualizarIdentificacaoVCP(id, valor) {
+    marcarAlteracaoPendente();
     setRespostasPorNorma((prev) => ({
       ...prev,
       VCP: {
@@ -1555,6 +1639,7 @@ export default function App() {
   }
 
   function aplicarClassificacaoVCP(item, nota) {
+    marcarAlteracaoPendente();
     const statusAutomatico = Number(nota) <= 2 ? "NÃO CONFORME" : "CONFORME";
     const chave = item.id || item.ref;
 
@@ -2019,6 +2104,7 @@ export default function App() {
   }
 
   function atualizarCampoConfig(campo, valor) {
+    marcarAlteracaoPendente();
     setConfigAerodromo((prev) => {
       const novo = { ...prev, [campo]: valor };
 
@@ -2087,6 +2173,7 @@ export default function App() {
   }
 
   async function adicionarEvidencias(item, arquivos) {
+    marcarAlteracaoPendente();
     const chave = item.id || item.ref;
     const listaArquivos = Array.from(arquivos || []).filter((arquivo) =>
       String(arquivo?.type || "").startsWith("image/")
@@ -2174,6 +2261,7 @@ export default function App() {
   }
 
   function removerEvidencia(item, indexEvidencia) {
+    marcarAlteracaoPendente();
     const chave = item.id || item.ref;
 
     setRespostasPorNorma((prev) => {
@@ -2194,6 +2282,7 @@ export default function App() {
   }
 
   function limparRespostasNormaAtual() {
+    marcarAlteracaoPendente();
     if (!window.confirm(`Deseja limpar somente as respostas da ${normaAtual.nome}?`)) return;
 
     setRespostasPorNorma((prev) => ({
@@ -2203,6 +2292,7 @@ export default function App() {
   }
 
   function limparInspecaoAtual() {
+    marcarAlteracaoPendente();
     if (!window.confirm("Deseja limpar completamente a inspeção atual?")) return;
     setConfigAerodromo(CONFIG_INICIAL);
     setIcao("");
@@ -2450,7 +2540,7 @@ export default function App() {
       if (!navegadorEstaOnline()) {
         adicionarInspecaoNaFilaSync(objeto);
         setMensagemBase(
-          origem === "autosave"
+          String(origem).startsWith("autosave")
             ? `Autosave offline realizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}. A sincronização ocorrerá quando a internet voltar.`
             : `Inspeção salva offline neste aparelho: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}). Será sincronizada quando a internet voltar.`
         );
@@ -2473,7 +2563,7 @@ export default function App() {
         gravarInspecoesLocalSeguro(listaSincronizada);
 
         setMensagemBase(
-          origem === "autosave"
+          String(origem).startsWith("autosave")
             ? `Autosave sincronizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}.`
             : `Inspeção salva e sincronizada: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`
         );
@@ -2486,7 +2576,7 @@ export default function App() {
           ultimoErroSync: mensagemErroFirebase(erro),
         });
         setMensagemBase(
-          origem === "autosave"
+          String(origem).startsWith("autosave")
             ? "Autosave local realizado. A sincronização online ficou pendente."
             : `Inspeção salva neste aparelho, mas ainda pendente de sincronização online: ${mensagemErroFirebase(erro)}`
         );
