@@ -61,6 +61,17 @@ export async function arquivoParaBase64(arquivo) {
   });
 }
 
+export async function obterDownloadURLPorStoragePath(storagePath) {
+  if (!storagePath) return "";
+  try {
+    const storageRef = ref(storage, storagePath);
+    return await getDownloadURL(storageRef);
+  } catch (erro) {
+    console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erro);
+    return "";
+  }
+}
+
 export async function enviarEvidenciaParaStorage({
   arquivo,
   usuario,
@@ -69,12 +80,17 @@ export async function enviarEvidenciaParaStorage({
   normaId,
   itemId,
   previewLocal = "",
+  miniaturaBase64 = "",
+  thumbnailBase64 = "",
   geolocalizacao = null,
   latitude = null,
   longitude = null,
   precisaoGPS = null,
   linkMaps = "",
   responsavel = "",
+  origemCaptura = "",
+  origemGeolocalizacao = "",
+  exif = null,
 }) {
   if (!arquivo) {
     throw new Error("Arquivo de imagem não informado.");
@@ -100,10 +116,15 @@ export async function enviarEvidenciaParaStorage({
       normaId: normaId || "",
       itemId: itemId || "",
       enviadoEm: dataAgoraISO(),
+      origemCaptura: origemCaptura || "",
+      origemGeolocalizacao: origemGeolocalizacao || "",
+      dataOriginalExifISO: exif?.dataOriginalISO || "",
+      dispositivoCaptura: exif?.dispositivo || "",
     },
   });
 
   const downloadURL = await getDownloadURL(storageRef);
+  const miniatura = miniaturaBase64 || thumbnailBase64 || "";
 
   return {
     storagePath,
@@ -111,6 +132,9 @@ export async function enviarEvidenciaParaStorage({
     url: downloadURL,
     data: previewLocal || "",
     previewLocal: previewLocal || "",
+    base64: previewLocal || "",
+    miniaturaBase64: miniatura,
+    thumbnailBase64: miniatura,
     imagemSalvaOnline: true,
     enviadoEm: dataAgoraISO(),
     geolocalizacao: geolocalizacao || null,
@@ -120,6 +144,14 @@ export async function enviarEvidenciaParaStorage({
     precisao: precisaoGPS ?? geolocalizacao?.precisao ?? null,
     linkMaps: linkMaps || geolocalizacao?.linkMaps || "",
     responsavel: responsavel || usuario?.nomeCompleto || usuario?.email || "",
+    origemCaptura: origemCaptura || "",
+    origemGeolocalizacao: origemGeolocalizacao || "",
+    exif: exif || null,
+    dataOriginalExif: exif?.dataOriginal || "",
+    dataOriginalExifISO: exif?.dataOriginalISO || "",
+    dispositivoCaptura: exif?.dispositivo || "",
+    modeloCaptura: exif?.modelo || "",
+    fabricanteCaptura: exif?.fabricante || "",
   };
 }
 
@@ -138,6 +170,9 @@ export async function excluirEvidenciaDoStorage(storagePath) {
 
 export function obterUrlImagemEvidencia(evidencia) {
   return (
+    evidencia?.miniaturaBase64 ||
+    evidencia?.thumbnailBase64 ||
+    evidencia?.thumbBase64 ||
     evidencia?.data ||
     evidencia?.previewLocal ||
     evidencia?.base64 ||
