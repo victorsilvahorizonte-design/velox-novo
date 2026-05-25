@@ -4125,6 +4125,64 @@ export default function App() {
         return y + linhas.length * lineHeight;
       }
 
+      function linhasTextoPDF(texto, maxWidth) {
+        return doc.splitTextToSize(String(texto || "—"), maxWidth);
+      }
+
+      function alturaLinhasPDF(linhas, lineHeight = 4.0) {
+        return Math.max(lineHeight, (Array.isArray(linhas) ? linhas.length : 1) * lineHeight);
+      }
+
+      function garantirEspacoPDF(yAtual, alturaNecessaria, tituloCabecalho, secaoRodape, yInicial = 40) {
+        if (yAtual + alturaNecessaria <= 262) return yAtual;
+        rodapeVCP(secaoRodape || tituloCabecalho || "Relatório");
+        doc.addPage();
+        cabecalhoVCP(tituloCabecalho || "Relatório VCP");
+        return yInicial;
+      }
+
+      function escreverBlocoTextoPaginado(titulo, texto, x, y, maxWidth, opcoes = {}) {
+        const {
+          tituloFontSize = 9,
+          textoFontSize = 8.2,
+          lineHeight = 4.4,
+          tituloColor = CORES.texto,
+          textoColor = CORES.cinza,
+          cabecalho = "Finalização VCP",
+          rodape = "Finalização",
+          margemInferior = 236,
+        } = opcoes;
+
+        doc.setFont(undefined, "bold");
+        doc.setFontSize(tituloFontSize);
+        doc.setTextColor(...tituloColor);
+        y = garantirEspacoPDF(y, 10, cabecalho, rodape, 40);
+        doc.text(titulo, x, y);
+
+        doc.setFont(undefined, "normal");
+        doc.setFontSize(textoFontSize);
+        doc.setTextColor(...textoColor);
+
+        const linhas = linhasTextoPDF(texto || "—", maxWidth);
+        y += 6;
+
+        for (const linha of linhas) {
+          if (y > margemInferior) {
+            rodapeVCP(rodape);
+            doc.addPage();
+            cabecalhoVCP(cabecalho);
+            y = 40;
+            doc.setFont(undefined, "normal");
+            doc.setFontSize(textoFontSize);
+            doc.setTextColor(...textoColor);
+          }
+          doc.text(linha, x, y);
+          y += lineHeight;
+        }
+
+        return y + 4;
+      }
+
       function desenharDegradeHorizontal(x, y, w, h) {
         const passos = 32;
         for (let i = 0; i < passos; i += 1) {
@@ -4300,16 +4358,26 @@ export default function App() {
         const temFotoCard = String(primeiraFotoBase64 || "").startsWith("data:image");
         const itemSemClassificacao = String(item.id || "") === "4.7";
 
-        if (y > 232) {
-          rodapeVCP("Cards VCP");
-          doc.addPage();
-          cabecalhoVCP("Cards VCP - Checklist Operacional");
-          y = 38;
-        }
+        const larguraTexto = temFotoCard ? 74 : 104;
+        const linhasDescricao = linhasTextoPDF(item.descricao || "—", larguraTexto);
+        const linhasCondicao = linhasTextoPDF(`Condição: ${resposta.condicaoAtual || "—"}`, larguraTexto);
+        const linhasObs = linhasTextoPDF(`Obs.: ${resposta.obs || "—"}`, larguraTexto);
+
+        const alturaTexto =
+          18 +
+          alturaLinhasPDF(linhasDescricao, 3.6) +
+          4 +
+          alturaLinhasPDF(linhasCondicao, 3.6) +
+          4 +
+          alturaLinhasPDF(linhasObs, 3.6);
+
+        const alturaCard = Math.max(62, alturaTexto + 12, temFotoCard ? 64 : 0);
+        y = garantirEspacoPDF(y, alturaCard + 8, "Cards VCP - Checklist Operacional", "Cards VCP", 40);
 
         doc.setDrawColor(...CORES.borda);
         doc.setFillColor(255, 255, 255);
-        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+        doc.roundedRect(14, y - 5, 182, alturaCard, 3, 3, "FD");
+
         const sc = statusColor(status);
         doc.setFillColor(sc[0], sc[1], sc[2]);
         doc.roundedRect(18, y, 14, 12, 2, 2, "F");
@@ -4320,14 +4388,22 @@ export default function App() {
 
         doc.setTextColor(...CORES.texto);
         doc.setFontSize(9.2);
+        doc.setFont(undefined, "bold");
         doc.text(item.titulo || item.item || "Item VCP", 38, y + 4);
+
         doc.setFont(undefined, "normal");
         doc.setFontSize(7.3);
         doc.setTextColor(...CORES.cinza);
-        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 64 : 98), 38, y + 12);
+
+        let yTexto = y + 12;
+        doc.text(linhasDescricao, 38, yTexto);
+        yTexto += alturaLinhasPDF(linhasDescricao, 3.6) + 4;
+
         doc.setFontSize(7.1);
-        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 64 : 98), 38, y + 32);
-        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 64 : 98), 38, y + 42);
+        doc.text(linhasCondicao, 38, yTexto);
+        yTexto += alturaLinhasPDF(linhasCondicao, 3.6) + 4;
+
+        doc.text(linhasObs, 38, yTexto);
 
         doc.setFillColor(sc[0], sc[1], sc[2]);
         doc.roundedRect(142, y, 38, 9, 2, 2, "F");
@@ -4338,7 +4414,7 @@ export default function App() {
         doc.setFont(undefined, "normal");
         doc.setTextColor(...CORES.cinza);
         doc.setFontSize(7.2);
-        doc.text("Classificação:", 151, y + 22, { align: "center" });
+        doc.text("Classificação:", 161, y + 22, { align: "center" });
         doc.setFontSize(13);
         doc.setTextColor(sc[0], sc[1], sc[2]);
         doc.setFont(undefined, "bold");
@@ -4347,12 +4423,13 @@ export default function App() {
 
         if (temFotoCard) {
           try {
-            adicionarImagemAjustada(doc, primeiraFotoBase64, 109, y + 15, 32, 32);
+            adicionarImagemAjustada(doc, primeiraFotoBase64, 108, y + 14, 32, 36);
           } catch (erro) {
             console.error("Erro ao inserir foto VCP no PDF:", erro);
           }
         }
-        y += 64;
+
+        y += alturaCard + 8;
       }
       rodapeVCP("Cards VCP");
 
@@ -4362,15 +4439,47 @@ export default function App() {
       doc.setFontSize(16);
       doc.setTextColor(...CORES.texto);
       doc.text("Finalização do Relatório VCP", 14, 40);
-      doc.setFontSize(9);
-      doc.setTextColor(...CORES.cinza);
-      textoQuebrado(`Responsável pela visita: ${finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "—"}`, 14, 56, 176);
-      textoQuebrado(`Participantes adicionais: ${finalizacao.participantesAdicionais || "—"}`, 14, 70, 176);
-      textoQuebrado(`Observações finais: ${finalizacao.obsFinal || "—"}`, 14, 84, 176);
+
+      y = 56;
+      y = escreverBlocoTextoPaginado(
+        "Responsável pela visita",
+        finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "—",
+        14,
+        y,
+        176,
+        { cabecalho: "Finalização VCP", rodape: "Finalização", textoFontSize: 8.5 }
+      );
+
+      y = escreverBlocoTextoPaginado(
+        "Participantes adicionais",
+        finalizacao.participantesAdicionais || "—",
+        14,
+        y,
+        176,
+        { cabecalho: "Finalização VCP", rodape: "Finalização", textoFontSize: 8.5 }
+      );
+
+      y = escreverBlocoTextoPaginado(
+        "Observações finais da visita",
+        finalizacao.obsFinal || "—",
+        14,
+        y,
+        176,
+        { cabecalho: "Finalização VCP", rodape: "Finalização", textoFontSize: 8.3, lineHeight: 4.5, margemInferior: 226 }
+      );
+
+      if (y > 222) {
+        rodapeVCP("Finalização");
+        doc.addPage();
+        cabecalhoVCP("Finalização VCP");
+        y = 48;
+      }
+
       doc.setDrawColor(22, 148, 70);
       doc.line(20, 245, 95, 245);
       doc.line(115, 245, 190, 245);
       doc.setFontSize(8);
+      doc.setTextColor(...CORES.cinza);
       doc.text("Responsável Velox", 57, 251, { align: "center" });
       doc.text("Representante do Aeroporto", 152, 251, { align: "center" });
       rodapeVCP("Finalização");
@@ -4378,52 +4487,55 @@ export default function App() {
       // FOTOS VINCULADAS
       if (evidencias.length > 0) {
         doc.addPage();
-        cabecalhoVCP("Fotos vinculadas aos cards");
+        cabecalhoVCP("Galeria de Evidências Fotográficas");
         doc.setFontSize(16);
         doc.setTextColor(...CORES.texto);
-        doc.text("Fotos vinculadas aos cards", 14, 40);
-        y = 54;
+        doc.text("Galeria de Evidências Fotográficas", 14, 40);
+        doc.setFontSize(8.2);
+        doc.setTextColor(...CORES.cinza);
+        doc.text("Cada evidência abaixo mantém somente a referência do item e a fotografia vinculada.", 14, 47);
+        y = 58;
+
         for (const ev of evidencias) {
-          const blocoAltura = 78;
-          if (y + blocoAltura > 262) {
-            rodapeVCP("Fotos vinculadas");
-            doc.addPage();
-            cabecalhoVCP("Fotos vinculadas aos cards");
-            y = 40;
-          }
+          const blocoAltura = 92;
+          y = garantirEspacoPDF(y, blocoAltura + 8, "Galeria de Evidências Fotográficas", "Fotos vinculadas", 40);
+
           doc.setDrawColor(...CORES.borda);
           doc.setFillColor(...CORES.fundo);
           doc.roundedRect(14, y - 5, 182, blocoAltura, 3, 3, "FD");
-          doc.setFontSize(8.8);
+
+          doc.setFontSize(9.2);
           doc.setTextColor(17, 83, 37);
           doc.setFont(undefined, "bold");
-          doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 2);
+          doc.text(`${ev.id} • Referência do item: ${ev.itemId}`, 18, y + 3);
+
           doc.setFont(undefined, "normal");
-          doc.setFontSize(7.6);
+          doc.setFontSize(7.4);
           doc.setTextColor(...CORES.cinza);
-          doc.text(`Condição: ${ev.condicaoAtual || "—"}`, 18, y + 13);
-          doc.text(`Data: ${dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm)}`, 18, y + 23);
-          doc.text(doc.splitTextToSize(`GPS: ${textoGeo(ev)}`, 70), 18, y + 33);
-          doc.text(doc.splitTextToSize(`Responsável: ${ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—"}`, 70), 18, y + 45);
+          const dataFoto = dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm);
+          doc.text(`Data da evidência: ${dataFoto}`, 18, y + 12);
+
           if (ev.linkMaps || ev.imagem?.linkMaps) {
             doc.setTextColor(22, 148, 70);
-            doc.textWithLink("Ver no mapa", 18, y + 60, { url: ev.linkMaps || ev.imagem?.linkMaps });
+            doc.textWithLink("Ver localização no mapa", 18, y + 22, { url: ev.linkMaps || ev.imagem?.linkMaps });
           }
+
           try {
             const imagemBase64 =
               (await prepararImagemParaRelatorio(ev.imagem)) ||
               (await prepararImagemParaRelatorio(ev));
             if (imagemBase64) {
-              adicionarImagemAjustada(doc, imagemBase64, 94, y - 1, 92, 66);
+              adicionarImagemAjustada(doc, imagemBase64, 54, y + 15, 122, 66);
             } else {
               doc.setFontSize(8);
               doc.setTextColor(239, 68, 68);
-              doc.text("Imagem não disponível.", 108, y + 28);
+              doc.text("Imagem não disponível.", 92, y + 45);
             }
           } catch (erro) {
             console.error("Erro ao inserir imagem VCP no PDF:", erro);
           }
-          y += blocoAltura + 7;
+
+          y += blocoAltura + 8;
         }
         rodapeVCP("Fotos vinculadas");
       }
