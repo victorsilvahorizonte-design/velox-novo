@@ -152,7 +152,7 @@ function chavesCacheEvidenciaVelox(evidencia = {}) {
 }
 
 async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
-  const base64 = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+  const base64 = [evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
   );
 
@@ -164,7 +164,7 @@ async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
 }
 
 async function obterEvidenciaDoCacheLocalVelox(evidencia = {}) {
-  const base64Direto = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+  const base64Direto = [evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
   );
   if (base64Direto) return base64Direto;
@@ -662,23 +662,20 @@ function removerConteudoPesadoImagem(evidencia = {}) {
   const downloadURL = evidencia.downloadURL || evidencia.url || "";
   const temUrlOnline = Boolean(downloadURL || evidencia.storagePath);
 
-  // VELOX V3 — Storage Only:
-  // Nunca gravar base64 pesado em localStorage/Firestore/fila offline.
-  // A imagem original e a miniatura ficam no Firebase Storage/IndexedDB.
-  // No objeto salvo ficam somente URLs, paths e metadados leves.
+  // Correção Bug 3:
+  // Só removemos o base64 do localStorage quando existe imagem online recuperável
+  // (downloadURL/storagePath). Se o upload falhar, manter o dataURL local evita
+  // perder a foto ao fechar e reabrir o app.
+  const dataOriginal = evidencia.data || evidencia.previewLocal || evidencia.base64 || "";
+  const deveRemoverBase64 = temUrlOnline && String(dataOriginal).startsWith("data:image");
+
   return {
     ...evidencia,
-    data: temUrlOnline ? "" : evidencia.data || "",
-    previewLocal: temUrlOnline ? "" : evidencia.previewLocal || "",
-    base64: temUrlOnline ? "" : evidencia.base64 || "",
-    miniaturaBase64: "",
-    thumbnailBase64: "",
-    thumbBase64: "",
-    miniaturaStoragePath: evidencia.miniaturaStoragePath || evidencia.thumbnailStoragePath || "",
-    thumbnailStoragePath: evidencia.thumbnailStoragePath || evidencia.miniaturaStoragePath || "",
-    miniaturaDownloadURL: evidencia.miniaturaDownloadURL || evidencia.thumbnailURL || evidencia.thumbnailDownloadURL || "",
-    thumbnailURL: evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || evidencia.thumbnailDownloadURL || "",
-    thumbnailDownloadURL: evidencia.thumbnailDownloadURL || evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || "",
+    data: deveRemoverBase64 ? "" : evidencia.data || "",
+    previewLocal: deveRemoverBase64 ? "" : evidencia.previewLocal || "",
+    base64: deveRemoverBase64 ? "" : evidencia.base64 || "",
+    miniaturaBase64: evidencia.miniaturaBase64 || evidencia.thumbnailBase64 || evidencia.thumbBase64 || "",
+    thumbnailBase64: evidencia.thumbnailBase64 || evidencia.miniaturaBase64 || "",
     downloadURL: evidencia.downloadURL || downloadURL || "",
     url: evidencia.url || downloadURL || "",
     imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath),
@@ -758,59 +755,10 @@ function lerFilaSyncLocal() {
   );
 }
 
-function criarResumoLeveFilaSync(inspecao = {}) {
-  return {
-    id: inspecao.id,
-    usuarioId: inspecao.usuarioId || "",
-    inspetorNome: inspecao.inspetorNome || "",
-    aeroporto: inspecao.aeroporto || criarSnapshotAeroporto(inspecao.configAerodromo || {}),
-    configAerodromo: inspecao.configAerodromo || {},
-    respostasPorNorma: criarRespostasLevesParaArmazenamentoLocal(reconstruirRespostasPorNorma(inspecao)),
-    criadoEm: inspecao.criadoEm || "",
-    atualizadoEm: inspecao.atualizadoEm || new Date().toISOString(),
-    statusGeral: inspecao.statusGeral || "em_andamento",
-    percentualConcluido: Number(inspecao.percentualConcluido || 0),
-    totalItens: Number(inspecao.totalItens || 0),
-    totalNaoConformidades: Number(inspecao.totalNaoConformidades || 0),
-    pendenteSync: true,
-    sincronizadoOnline: false,
-    ultimoErroSync: inspecao.ultimoErroSync || "",
-  };
-}
-
 function gravarFilaSyncLocal(lista = []) {
-  const validas = filtrarInspecoesValidas(lista).map(criarResumoLeveFilaSync);
-  try {
-    localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
-    return validas;
-  } catch (erro) {
-    console.warn("Fila offline excedeu a quota local. Gravando fila mínima sem respostas para proteger o app.", erro);
-    const minima = validas.map((insp) => ({
-      id: insp.id,
-      usuarioId: insp.usuarioId || "",
-      inspetorNome: insp.inspetorNome || "",
-      aeroporto: insp.aeroporto || {},
-      configAerodromo: insp.configAerodromo || {},
-      criadoEm: insp.criadoEm || "",
-      atualizadoEm: insp.atualizadoEm || new Date().toISOString(),
-      statusGeral: insp.statusGeral || "em_andamento",
-      percentualConcluido: Number(insp.percentualConcluido || 0),
-      totalItens: Number(insp.totalItens || 0),
-      totalNaoConformidades: Number(insp.totalNaoConformidades || 0),
-      pendenteSync: true,
-      sincronizadoOnline: false,
-      ultimoErroSync: insp.ultimoErroSync || "Fila local reduzida por limite de espaço do navegador.",
-      respostasPorNorma: criarRespostasNormas(),
-    }));
-    try {
-      localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(minima));
-      return minima;
-    } catch (erroMinimo) {
-      console.error("Não foi possível gravar nem a fila mínima offline.", erroMinimo);
-      localStorage.removeItem(STORAGE_KEYS.inspecoesPendentesSync);
-      return [];
-    }
-  }
+  const validas = filtrarInspecoesValidas(lista);
+  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas.map(criarInspecaoLeveParaStorage)));
+  return validas;
 }
 
 function adicionarInspecaoNaFilaSync(inspecao) {
@@ -1064,7 +1012,7 @@ function carregarImagemBase64Velox(base64) {
   });
 }
 
-async function gerarMiniaturaBase64Velox(fonteBase64, larguraMaxima = 220, qualidade = 0.42) {
+async function gerarMiniaturaBase64Velox(fonteBase64, larguraMaxima = 360, qualidade = 0.58) {
   try {
     if (!String(fonteBase64 || "").startsWith("data:image")) return "";
 
@@ -1343,10 +1291,6 @@ async function prepararImagemParaRelatorio(imagem) {
     if (base64Cache) return base64Cache;
 
     const candidatos = [
-      imagem.miniaturaDownloadURL,
-      imagem.thumbnailURL,
-      imagem.thumbnailDownloadURL,
-      imagem.urlMiniatura,
       imagem.downloadURL,
       imagem.url,
       imagem.data,
@@ -1426,7 +1370,7 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
     String(valor || "").startsWith("data:image")
   ) || "";
 
-  const urlOnline = [imagem?.miniaturaDownloadURL, imagem?.thumbnailURL, imagem?.thumbnailDownloadURL, imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+  const urlOnline = [imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
     String(valor || "").startsWith("http")
   ) || "";
 
@@ -1449,11 +1393,6 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
     downloadURL: imagem?.downloadURL || urlOnline || "",
     url: imagem?.url || imagem?.downloadURL || urlOnline || "",
     storagePath: imagem?.storagePath || "",
-    miniaturaStoragePath: imagem?.miniaturaStoragePath || imagem?.thumbnailStoragePath || "",
-    thumbnailStoragePath: imagem?.thumbnailStoragePath || imagem?.miniaturaStoragePath || "",
-    miniaturaDownloadURL: imagem?.miniaturaDownloadURL || imagem?.thumbnailURL || imagem?.thumbnailDownloadURL || "",
-    thumbnailURL: imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || imagem?.thumbnailDownloadURL || "",
-    thumbnailDownloadURL: imagem?.thumbnailDownloadURL || imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || "",
     imagemSalvaOnline: Boolean(imagem?.imagemSalvaOnline || urlOnline || imagem?.storagePath),
     geolocalizacao,
     latitude,
@@ -1568,13 +1507,10 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
           tamanho: ev?.tamanho || ev?.size || null,
-          // Storage Only: não enviar base64/miniaturaBase64 para Firestore.
-          // Miniaturas devem ficar no Firebase Storage e o Firestore guarda só URL/path.
-          miniaturaStoragePath: ev?.miniaturaStoragePath || ev?.thumbnailStoragePath || "",
-          thumbnailStoragePath: ev?.thumbnailStoragePath || ev?.miniaturaStoragePath || "",
-          miniaturaDownloadURL: ev?.miniaturaDownloadURL || ev?.thumbnailURL || ev?.thumbnailDownloadURL || "",
-          thumbnailURL: ev?.thumbnailURL || ev?.miniaturaDownloadURL || ev?.thumbnailDownloadURL || "",
-          thumbnailDownloadURL: ev?.thumbnailDownloadURL || ev?.thumbnailURL || ev?.miniaturaDownloadURL || "",
+          // Miniatura leve para PDF: mantém relatório funcionando no PC/celular
+          // mesmo após limpar cache, sem depender de fetch/CORS do Storage.
+          miniaturaBase64: ev?.miniaturaBase64 || ev?.thumbnailBase64 || ev?.thumbBase64 || "",
+          thumbnailBase64: ev?.thumbnailBase64 || ev?.miniaturaBase64 || "",
           criadoEm: ev?.criadoEm || "",
           capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
           enviadoEm: ev?.enviadoEm || "",
@@ -1590,6 +1526,7 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           linkMaps: ev?.linkMaps || ev?.geolocalizacao?.linkMaps || "",
           origemCaptura: ev?.origemCaptura || "",
           origemGeolocalizacao: ev?.origemGeolocalizacao || "",
+          observacaoLocalizacao: ev?.observacaoLocalizacao || ev?.geolocalizacao?.observacaoLocalizacao || "",
           dataOriginalExif: ev?.dataOriginalExif || ev?.exif?.dataOriginal || "",
           dataOriginalExifISO: ev?.dataOriginalExifISO || ev?.exif?.dataOriginalISO || "",
           dispositivoCaptura: ev?.dispositivoCaptura || ev?.exif?.dispositivo || "",
@@ -2941,6 +2878,102 @@ export default function App() {
     }
   }
 
+
+  function normalizarNumeroCoordenadaManual(valor) {
+    if (valor === null || valor === undefined) return null;
+    const texto = String(valor)
+      .trim()
+      .replace(",", ".")
+      .replace(/[^0-9.+-]/g, "");
+    if (!texto) return null;
+    const numero = Number(texto);
+    return Number.isFinite(numero) ? numero : null;
+  }
+
+  function montarGeolocalizacaoManualVelox(latitude, longitude, observacao = "") {
+    const lat = normalizarNumeroCoordenadaManual(latitude);
+    const lon = normalizarNumeroCoordenadaManual(longitude);
+
+    if (lat === null || lon === null || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      alert("Coordenadas inválidas. Use o formato decimal, exemplo: -0.971235 e -62.922075.");
+      return null;
+    }
+
+    return {
+      disponivel: true,
+      latitude: lat,
+      longitude: lon,
+      precisao: null,
+      altitude: null,
+      capturadoEm: new Date().toISOString(),
+      linkMaps: `https://www.google.com/maps?q=${lat},${lon}`,
+      origem: "manual",
+      observacaoLocalizacao: String(observacao || "").trim(),
+    };
+  }
+
+  async function escolherGeolocalizacaoParaGaleriaSemExifVelox({ arquivo, obterGeolocalizacaoAtualUmaVez }) {
+    const nome = arquivo?.name || "foto selecionada";
+    const escolha = window.prompt(
+      `A imagem "${nome}" não possui GPS EXIF original acessível.\n\n` +
+        "Escolha uma opção:\n" +
+        "1 = Usar localização atual do celular\n" +
+        "2 = Digitar coordenadas manualmente\n" +
+        "3 = Continuar sem localização",
+      "1"
+    );
+
+    const opcao = String(escolha || "3").trim();
+
+    if (opcao === "1") {
+      const geoAtual = await obterGeolocalizacaoAtualUmaVez();
+      return {
+        geolocalizacao: geoAtual,
+        origemGeolocalizacao: geoAtual?.disponivel ? "gps_atual_confirmado_galeria" : "gps_indisponivel_galeria",
+        observacaoLocalizacao: geoAtual?.mensagem || "Localização atual usada para foto da galeria sem GPS EXIF.",
+      };
+    }
+
+    if (opcao === "2") {
+      const latitudeManual = window.prompt("Digite a latitude em decimal. Exemplo: -0.971235", "");
+      const longitudeManual = window.prompt("Digite a longitude em decimal. Exemplo: -62.922075", "");
+      const observacaoManual = window.prompt(
+        "Observação da localização manual, se desejar.",
+        "Coordenada informada manualmente pelo inspetor."
+      );
+      const geoManual = montarGeolocalizacaoManualVelox(latitudeManual, longitudeManual, observacaoManual);
+      if (geoManual?.disponivel) {
+        return {
+          geolocalizacao: geoManual,
+          origemGeolocalizacao: "gps_manual_galeria",
+          observacaoLocalizacao: geoManual.observacaoLocalizacao || "Coordenada informada manualmente pelo inspetor.",
+        };
+      }
+
+      return {
+        geolocalizacao: {
+          disponivel: false,
+          mensagem: "Coordenada manual inválida ou cancelada.",
+          criadoEm: new Date().toISOString(),
+          origem: "manual_cancelado",
+        },
+        origemGeolocalizacao: "gps_manual_invalido_galeria",
+        observacaoLocalizacao: "Coordenada manual inválida ou cancelada.",
+      };
+    }
+
+    return {
+      geolocalizacao: {
+        disponivel: false,
+        mensagem: "Foto anexada sem GPS EXIF. Usuário optou por continuar sem localização.",
+        criadoEm: new Date().toISOString(),
+        origem: "galeria_sem_gps_confirmado",
+      },
+      origemGeolocalizacao: "galeria_sem_gps_original",
+      observacaoLocalizacao: "Foto sem GPS EXIF original e sem localização atribuída.",
+    };
+  }
+
   async function adicionarEvidencias(item, arquivos, origemCaptura = "galeria") {
     marcarAlteracaoPendente();
     const chave = item.id || item.ref;
@@ -2967,6 +3000,7 @@ export default function App() {
       let exifInfo = {};
       let geolocalizacao = null;
       let origemGeolocalizacao = origemCaptura === "camera" ? "gps_atual_camera" : "sem_gps";
+      let observacaoLocalizacao = "";
 
       try {
         exifInfo = await lerExifImagemVelox(arquivo);
@@ -2978,28 +3012,19 @@ export default function App() {
       if (origemCaptura === "galeria" && exifInfo?.temGPS) {
         geolocalizacao = montarGeoAPartirDoExifVelox(exifInfo);
         origemGeolocalizacao = "exif_gps_original";
+        observacaoLocalizacao = "GPS original extraído do EXIF da foto.";
       } else if (origemCaptura === "camera") {
         geolocalizacao = await obterGeolocalizacaoAtualUmaVez();
         origemGeolocalizacao = geolocalizacao?.disponivel ? "gps_atual_camera" : "gps_indisponivel_camera";
+        observacaoLocalizacao = geolocalizacao?.disponivel ? "GPS atual capturado no momento da foto." : geolocalizacao?.mensagem || "GPS atual indisponível.";
       } else {
-        if (usuarioAutorizouGpsAtualParaGaleria === null) {
-          usuarioAutorizouGpsAtualParaGaleria = window.confirm(
-            "Esta foto da galeria não possui GPS original EXIF acessível. Deseja usar a localização atual do celular como referência?"
-          );
-        }
-
-        if (usuarioAutorizouGpsAtualParaGaleria) {
-          geolocalizacao = await obterGeolocalizacaoAtualUmaVez();
-          origemGeolocalizacao = geolocalizacao?.disponivel ? "gps_atual_confirmado_galeria" : "gps_indisponivel_galeria";
-        } else {
-          geolocalizacao = {
-            disponivel: false,
-            mensagem: "Foto anexada sem GPS EXIF. Usuário optou por não usar GPS atual.",
-            criadoEm: agora,
-            origem: "galeria_sem_gps_confirmado",
-          };
-          origemGeolocalizacao = "galeria_sem_gps_original";
-        }
+        const escolhaGeo = await escolherGeolocalizacaoParaGaleriaSemExifVelox({
+          arquivo,
+          obterGeolocalizacaoAtualUmaVez,
+        });
+        geolocalizacao = escolhaGeo.geolocalizacao;
+        origemGeolocalizacao = escolhaGeo.origemGeolocalizacao;
+        observacaoLocalizacao = escolhaGeo.observacaoLocalizacao || geolocalizacao?.observacaoLocalizacao || geolocalizacao?.mensagem || "";
       }
 
       try {
@@ -3011,7 +3036,7 @@ export default function App() {
       }
 
       try {
-        miniaturaBase64 = await gerarMiniaturaBase64Velox(previewBase64, 220, 0.42);
+        miniaturaBase64 = await gerarMiniaturaBase64Velox(previewBase64, 360, 0.58);
       } catch (erro) {
         console.warn("Miniatura não gerada; usando preview local como reserva:", erro);
         miniaturaBase64 = previewBase64;
@@ -3043,6 +3068,7 @@ export default function App() {
           responsavel: usuarioLogado?.nomeCompleto || "",
           origemCaptura,
           origemGeolocalizacao,
+          observacaoLocalizacao,
           exif: montarMetadadosExifVelox(exifInfo, arquivo),
         });
       } catch (erro) {
@@ -3061,11 +3087,6 @@ export default function App() {
         miniaturaBase64: miniaturaBase64 || previewBase64,
         thumbnailBase64: miniaturaBase64 || previewBase64,
         storagePath: uploadResultado?.storagePath || "",
-        miniaturaStoragePath: uploadResultado?.miniaturaStoragePath || uploadResultado?.thumbnailStoragePath || "",
-        thumbnailStoragePath: uploadResultado?.thumbnailStoragePath || uploadResultado?.miniaturaStoragePath || "",
-        miniaturaDownloadURL: uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.thumbnailDownloadURL || "",
-        thumbnailURL: uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailDownloadURL || "",
-        thumbnailDownloadURL: uploadResultado?.thumbnailDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || "",
         downloadURL: uploadResultado?.downloadURL || "",
         url: uploadResultado?.downloadURL || uploadResultado?.url || "",
         imagemSalvaOnline: Boolean(uploadResultado?.downloadURL || uploadResultado?.storagePath),
@@ -3084,6 +3105,7 @@ export default function App() {
         linkMaps: geolocalizacao?.linkMaps || (latitudeFinal && longitudeFinal ? `https://www.google.com/maps?q=${latitudeFinal},${longitudeFinal}` : ""),
         origemCaptura,
         origemGeolocalizacao,
+        observacaoLocalizacao,
         exif: montarMetadadosExifVelox(exifInfo, arquivo),
         dataOriginalExif: exifInfo?.dataOriginal || "",
         dataOriginalExifISO: exifInfo?.dataOriginalISO || "",
@@ -4261,45 +4283,8 @@ export default function App() {
           : "";
         const temFotoCard = String(primeiraFotoBase64 || "").startsWith("data:image");
         const itemSemClassificacao = String(item.id || "") === "4.7";
-        const sc = statusColor(status);
 
-        // Layout Premium VELOX — card dinâmico em duas colunas reais.
-        // Evita que foto sobreponha texto quando descrição, condição ou observação são longas.
-        const cardX = 14;
-        const cardW = 182;
-        const padding = 6;
-        const numeroW = 16;
-        const fotoW = temFotoCard ? 48 : 0;
-        const gapFoto = temFotoCard ? 6 : 0;
-        const textoX = cardX + padding + numeroW + 4;
-        const textoW = cardW - padding * 2 - numeroW - 4 - fotoW - gapFoto - 6;
-        const fotoX = cardX + cardW - padding - fotoW;
-        const topoConteudo = y + 7;
-
-        doc.setFont(undefined, "bold");
-        doc.setFontSize(9.2);
-        const linhasTitulo = doc.splitTextToSize(item.titulo || item.item || "Item VCP", textoW);
-        doc.setFont(undefined, "normal");
-        doc.setFontSize(7.3);
-        const linhasDescricao = doc.splitTextToSize(item.descricao || "—", textoW);
-        doc.setFontSize(7.1);
-        const linhasCondicao = doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, textoW);
-        const linhasObs = doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, textoW);
-
-        const alturaTexto =
-          8 +
-          linhasTitulo.length * 4.2 +
-          2 +
-          linhasDescricao.length * 3.7 +
-          3 +
-          linhasCondicao.length * 3.6 +
-          3 +
-          linhasObs.length * 3.6 +
-          8;
-        const alturaFoto = temFotoCard ? 50 : 0;
-        const cardH = Math.max(58, alturaTexto, alturaFoto + 18);
-
-        if (y + cardH > 265) {
+        if (y > 232) {
           rodapeVCP("Cards VCP");
           doc.addPage();
           cabecalhoVCP("Cards VCP - Checklist Operacional");
@@ -4308,72 +4293,51 @@ export default function App() {
 
         doc.setDrawColor(...CORES.borda);
         doc.setFillColor(255, 255, 255);
-        doc.roundedRect(cardX, y - 5, cardW, cardH, 3, 3, "FD");
-
-        // Faixa discreta de identificação do item
+        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+        const sc = statusColor(status);
         doc.setFillColor(sc[0], sc[1], sc[2]);
-        doc.roundedRect(cardX + padding - 1, y + 2, numeroW, 12, 2, 2, "F");
-        doc.setFontSize(8.2);
+        doc.roundedRect(18, y, 14, 12, 2, 2, "F");
+        doc.setFontSize(8.5);
         doc.setTextColor(255, 255, 255);
         doc.setFont(undefined, "bold");
-        doc.text(String(chave), cardX + padding - 1 + numeroW / 2, y + 10, { align: "center" });
+        doc.text(String(chave), 25, y + 8, { align: "center" });
 
-        // Coluna de texto
-        let textoY = y + 5;
         doc.setTextColor(...CORES.texto);
         doc.setFontSize(9.2);
-        doc.setFont(undefined, "bold");
-        doc.text(linhasTitulo, textoX, textoY);
-        textoY += linhasTitulo.length * 4.2 + 3;
-
+        doc.text(item.titulo || item.item || "Item VCP", 38, y + 4);
         doc.setFont(undefined, "normal");
         doc.setFontSize(7.3);
         doc.setTextColor(...CORES.cinza);
-        doc.text(linhasDescricao, textoX, textoY);
-        textoY += linhasDescricao.length * 3.7 + 4;
-
+        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 78 : 98), 38, y + 12);
         doc.setFontSize(7.1);
-        doc.text(linhasCondicao, textoX, textoY);
-        textoY += linhasCondicao.length * 3.6 + 4;
-        doc.text(linhasObs, textoX, textoY);
+        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 78 : 98), 38, y + 32);
+        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 78 : 98), 38, y + 42);
 
-        // Coluna direita: status/classificação/foto, sem invadir texto
-        const colunaX = temFotoCard ? fotoX : 145;
-        const colunaW = temFotoCard ? fotoW : 38;
         doc.setFillColor(sc[0], sc[1], sc[2]);
-        doc.roundedRect(colunaX, y + 2, colunaW, 9, 2, 2, "F");
+        doc.roundedRect(142, y, 38, 9, 2, 2, "F");
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(6.4);
-        doc.setFont(undefined, "bold");
-        doc.text(status, colunaX + colunaW / 2, y + 8, { align: "center" });
-        doc.setFont(undefined, "normal");
-
-        doc.setTextColor(...CORES.cinza);
         doc.setFontSize(6.8);
-        doc.text("Classificação", colunaX + colunaW / 2, y + 16, { align: "center" });
-        doc.setFontSize(11.5);
+        doc.setFont(undefined, "bold");
+        doc.text(status, 161, y + 6, { align: "center" });
+        doc.setFont(undefined, "normal");
+        doc.setTextColor(...CORES.cinza);
+        doc.setFontSize(7.2);
+        doc.text("Classificação:", 151, y + 22, { align: "center" });
+        doc.setFontSize(13);
         doc.setTextColor(sc[0], sc[1], sc[2]);
         doc.setFont(undefined, "bold");
-        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", colunaX + colunaW / 2, y + 25, { align: "center" });
+        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", 161, y + 34, { align: "center" });
         doc.setFont(undefined, "normal");
 
         if (temFotoCard) {
           try {
             const formato = extensaoImagem(primeiraFotoBase64) === "png" ? "PNG" : "JPEG";
-            const imgW = 44;
-            const imgH = 34;
-            const imgX = fotoX + (fotoW - imgW) / 2;
-            const imgY = y + 30;
-            doc.setDrawColor(226, 232, 240);
-            doc.setFillColor(248, 250, 252);
-            doc.roundedRect(imgX - 1.5, imgY - 1.5, imgW + 3, imgH + 3, 2, 2, "FD");
-            doc.addImage(primeiraFotoBase64, formato, imgX, imgY, imgW, imgH);
+            doc.addImage(primeiraFotoBase64, formato, 108, y + 15, 30, 30);
           } catch (erro) {
             console.error("Erro ao inserir foto VCP no PDF:", erro);
           }
         }
-
-        y += cardH + 8;
+        y += 64;
       }
       rodapeVCP("Cards VCP");
 

@@ -90,6 +90,7 @@ export async function enviarEvidenciaParaStorage({
   responsavel = "",
   origemCaptura = "",
   origemGeolocalizacao = "",
+  observacaoLocalizacao = "",
   exif = null,
 }) {
   if (!arquivo) {
@@ -115,11 +116,9 @@ export async function enviarEvidenciaParaStorage({
       icao: icao || "",
       normaId: normaId || "",
       itemId: itemId || "",
-      enviadoEm: dataAgoraISO(),
       origemCaptura: origemCaptura || "",
       origemGeolocalizacao: origemGeolocalizacao || "",
-      dataOriginalExifISO: exif?.dataOriginalISO || "",
-      dispositivoCaptura: exif?.dispositivo || "",
+      enviadoEm: dataAgoraISO(),
     },
   });
 
@@ -144,14 +143,10 @@ export async function enviarEvidenciaParaStorage({
     precisao: precisaoGPS ?? geolocalizacao?.precisao ?? null,
     linkMaps: linkMaps || geolocalizacao?.linkMaps || "",
     responsavel: responsavel || usuario?.nomeCompleto || usuario?.email || "",
-    origemCaptura: origemCaptura || "",
-    origemGeolocalizacao: origemGeolocalizacao || "",
-    exif: exif || null,
-    dataOriginalExif: exif?.dataOriginal || "",
-    dataOriginalExifISO: exif?.dataOriginalISO || "",
-    dispositivoCaptura: exif?.dispositivo || "",
-    modeloCaptura: exif?.modelo || "",
-    fabricanteCaptura: exif?.fabricante || "",
+    origemCaptura,
+    origemGeolocalizacao,
+    observacaoLocalizacao,
+    exif,
   };
 }
 
