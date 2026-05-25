@@ -170,14 +170,17 @@ export async function excluirEvidenciaDoStorage(storagePath) {
 
 export function obterUrlImagemEvidencia(evidencia) {
   return (
-    evidencia?.miniaturaBase64 ||
-    evidencia?.thumbnailBase64 ||
-    evidencia?.thumbBase64 ||
+    evidencia?.downloadURL ||
+    evidencia?.url ||
+    evidencia?.miniaturaDownloadURL ||
+    evidencia?.thumbnailURL ||
+    evidencia?.thumbnailDownloadURL ||
     evidencia?.data ||
     evidencia?.previewLocal ||
     evidencia?.base64 ||
-    evidencia?.downloadURL ||
-    evidencia?.url ||
+    evidencia?.miniaturaBase64 ||
+    evidencia?.thumbnailBase64 ||
+    evidencia?.thumbBase64 ||
     ""
   );
 }

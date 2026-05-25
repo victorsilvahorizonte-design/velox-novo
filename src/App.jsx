@@ -1320,38 +1320,37 @@ async function prepararImagemParaRelatorio(imagem) {
   try {
     if (!imagem) return "";
 
-    // Prioridade absoluta: miniatura leve salva junto da inspeção.
-    // Ela viaja pelo Firestore e não depende de cache do Chrome, fetch, canvas externo ou CORS.
-    const miniaturaDireta = [imagem.miniaturaBase64, imagem.thumbnailBase64, imagem.thumbBase64].find((valor) =>
-      String(valor || "").startsWith("data:image")
-    );
-    if (miniaturaDireta) {
-      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: miniaturaDireta });
-      return miniaturaDireta;
-    }
+    // VELOX V3 PDF — prioridade para fonte estável.
+    // Para relatório no celular, evita depender de previewLocal/blob/cache temporário.
+    // A ordem correta é:
+    // 1) base64 já válido;
+    // 2) cache local IndexedDB;
+    // 3) URL oficial do Firebase Storage/downloadURL;
+    // 4) storagePath recuperado no Firebase.
+    const base64Direto = [
+      imagem.data,
+      imagem.previewLocal,
+      imagem.base64,
+      imagem.miniaturaBase64,
+      imagem.thumbnailBase64,
+      imagem.thumbBase64,
+    ].find((valor) => String(valor || "").startsWith("data:image"));
 
-    const base64Direto = [imagem.data, imagem.previewLocal, imagem.base64].find((valor) =>
-      String(valor || "").startsWith("data:image")
-    );
     if (base64Direto) {
-      const miniaturaGerada = await gerarMiniaturaBase64Velox(base64Direto);
-      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: miniaturaGerada || base64Direto });
-      return miniaturaGerada || base64Direto;
+      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Direto });
+      return base64Direto;
     }
 
     const base64Cache = await obterEvidenciaDoCacheLocalVelox(imagem);
     if (base64Cache) return base64Cache;
 
     const candidatos = [
+      imagem.downloadURL,
+      imagem.url,
       imagem.miniaturaDownloadURL,
       imagem.thumbnailURL,
       imagem.thumbnailDownloadURL,
       imagem.urlMiniatura,
-      imagem.downloadURL,
-      imagem.url,
-      imagem.data,
-      imagem.previewLocal,
-      imagem.base64,
     ].filter(Boolean);
 
     if (imagem.storagePath) {
@@ -4296,8 +4295,8 @@ export default function App() {
           3 +
           linhasObs.length * 3.6 +
           8;
-        const alturaFoto = temFotoCard ? 50 : 0;
-        const cardH = Math.max(58, alturaTexto, alturaFoto + 18);
+        const alturaFoto = temFotoCard ? 70 : 0;
+        const cardH = Math.max(temFotoCard ? 78 : 58, alturaTexto, alturaFoto + 12);
 
         if (y + cardH > 265) {
           rodapeVCP("Cards VCP");
@@ -4396,58 +4395,88 @@ export default function App() {
       doc.text("Representante do Aeroporto", 152, 251, { align: "center" });
       rodapeVCP("Finalização");
 
-      // FOTOS VINCULADAS
+      // GALERIA FINAL DE EVIDÊNCIAS
+      // Nesta última seção não repetimos condição/observação longa.
+      // Isso evita texto embaralhado no celular e deixa a foto grande, com apenas a referência do card.
       if (evidencias.length > 0) {
         doc.addPage();
-        cabecalhoVCP("Fotos vinculadas aos cards");
+        cabecalhoVCP("Galeria de evidências fotográficas");
         doc.setFontSize(16);
         doc.setTextColor(...CORES.texto);
-        doc.text("Fotos vinculadas aos cards", 14, 40);
-        y = 54;
+        doc.text("Galeria de evidências fotográficas", 14, 40);
+        doc.setFontSize(8.2);
+        doc.setTextColor(...CORES.cinza);
+        doc.text("Fotos vinculadas aos respectivos cards do checklist VCP.", 14, 46);
+        y = 58;
+
         for (const ev of evidencias) {
-          if (y > 222) {
-            rodapeVCP("Fotos vinculadas");
+          const cardH = 82;
+
+          if (y + cardH > 266) {
+            rodapeVCP("Evidências");
             doc.addPage();
-            cabecalhoVCP("Fotos vinculadas aos cards");
-            y = 40;
+            cabecalhoVCP("Galeria de evidências fotográficas");
+            y = 42;
           }
+
           doc.setDrawColor(...CORES.borda);
           doc.setFillColor(...CORES.fundo);
-          doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
-          doc.setFontSize(8.2);
+          doc.roundedRect(14, y - 5, 182, cardH, 3, 3, "FD");
+
+          // Referência objetiva do card/foto, sem repetir textos longos.
+          doc.setFontSize(8.5);
           doc.setTextColor(17, 83, 37);
           doc.setFont(undefined, "bold");
-          doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 2);
+          doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 3);
+
           doc.setFont(undefined, "normal");
-          doc.setFontSize(7.4);
+          doc.setFontSize(7.2);
           doc.setTextColor(...CORES.cinza);
-          doc.text(doc.splitTextToSize(ev.itemTitulo, 90), 18, y + 11);
-          doc.text(doc.splitTextToSize(`Condição: ${ev.condicaoAtual || "—"}`, 90), 18, y + 24);
-          doc.text(dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm), 18, y + 36);
-          doc.text(textoGeo(ev), 18, y + 43);
-          doc.text(`Responsável: ${ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—"}`, 18, y + 50);
+
+          const tituloCurto = String(ev.itemTitulo || "Card vinculado").slice(0, 90);
+          doc.text(doc.splitTextToSize(tituloCurto, 74), 18, y + 13);
+
+          const dataFoto = dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm);
+          const geoFoto = textoGeo(ev);
+          const respFoto = ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—";
+
+          doc.text(`Data/hora: ${dataFoto}`, 18, y + 31);
+          doc.text(doc.splitTextToSize(`GPS: ${geoFoto}`, 74), 18, y + 39);
+          doc.text(doc.splitTextToSize(`Responsável: ${respFoto}`, 74), 18, y + 51);
+
           if (ev.linkMaps || ev.imagem?.linkMaps) {
             doc.setTextColor(22, 148, 70);
-            doc.textWithLink("Ver no mapa", 93, y + 50, { url: ev.linkMaps || ev.imagem?.linkMaps });
+            doc.textWithLink("Ver localização no mapa", 18, y + 65, { url: ev.linkMaps || ev.imagem?.linkMaps });
           }
+
           try {
             const imagemBase64 =
               (await prepararImagemParaRelatorio(ev.imagem)) ||
               (await prepararImagemParaRelatorio(ev));
+
             if (imagemBase64) {
               const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
-              doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+              // Foto maior e estável. Mantém proporção visual operacional sem invadir texto.
+              doc.setDrawColor(226, 232, 240);
+              doc.setFillColor(255, 255, 255);
+              doc.roundedRect(100, y - 1, 82, 62, 2, 2, "FD");
+              doc.addImage(imagemBase64, formato, 102, y + 1, 78, 58);
             } else {
               doc.setFontSize(8);
               doc.setTextColor(239, 68, 68);
-              doc.text("Imagem não disponível.", 122, y + 15);
+              doc.text("Imagem não disponível.", 122, y + 24);
             }
           } catch (erro) {
             console.error("Erro ao inserir imagem VCP no PDF:", erro);
+            doc.setFontSize(8);
+            doc.setTextColor(239, 68, 68);
+            doc.text("Imagem não disponível.", 122, y + 24);
           }
-          y += 65;
+
+          y += cardH + 10;
         }
-        rodapeVCP("Fotos vinculadas");
+
+        rodapeVCP("Evidências");
       }
 
       const pdfBlob = doc.output("blob");
