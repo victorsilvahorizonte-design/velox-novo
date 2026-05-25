@@ -30,6 +30,7 @@ import {
   enviarEvidenciaParaStorage,
   arquivoParaBase64,
   obterUrlImagemEvidencia,
+  obterDownloadURLPorStoragePath,
   excluirEvidenciaDoStorage,
 } from "./services/firebaseStorageService";
 
@@ -67,6 +68,162 @@ const STORAGE_KEYS = {
   ultimoAutosave: "velox_ultimo_autosave",
   baseANAC: "baseANAC",
 };
+
+
+const EVIDENCIAS_DB_NOME = "velox_evidencias_fotos_db";
+const EVIDENCIAS_DB_STORE = "fotos_base64";
+
+function abrirBancoEvidenciasVelox() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      resolve(null);
+      return;
+    }
+
+    const request = indexedDB.open(EVIDENCIAS_DB_NOME, 1);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(EVIDENCIAS_DB_STORE)) {
+        db.createObjectStore(EVIDENCIAS_DB_STORE);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function salvarFotoBase64CacheVelox(chave, base64) {
+  if (!chave || !String(base64 || "").startsWith("data:image")) return false;
+
+  try {
+    const db = await abrirBancoEvidenciasVelox();
+    if (!db) return false;
+
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(EVIDENCIAS_DB_STORE, "readwrite");
+      tx.objectStore(EVIDENCIAS_DB_STORE).put(base64, String(chave));
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+
+    db.close();
+    return true;
+  } catch (erro) {
+    console.warn("Não foi possível salvar foto no cache local IndexedDB:", erro);
+    return false;
+  }
+}
+
+async function obterFotoBase64CacheVelox(chave) {
+  if (!chave) return "";
+
+  try {
+    const db = await abrirBancoEvidenciasVelox();
+    if (!db) return "";
+
+    const valor = await new Promise((resolve, reject) => {
+      const tx = db.transaction(EVIDENCIAS_DB_STORE, "readonly");
+      const request = tx.objectStore(EVIDENCIAS_DB_STORE).get(String(chave));
+      request.onsuccess = () => resolve(request.result || "");
+      request.onerror = () => reject(request.error);
+    });
+
+    db.close();
+    return String(valor || "").startsWith("data:image") ? valor : "";
+  } catch (erro) {
+    console.warn("Não foi possível ler foto do cache local IndexedDB:", erro);
+    return "";
+  }
+}
+
+function chavesCacheEvidenciaVelox(evidencia = {}) {
+  return [
+    evidencia?.id,
+    evidencia?.storagePath,
+    evidencia?.downloadURL,
+    evidencia?.url,
+    evidencia?.nome && evidencia?.capturadoEm ? `${evidencia.nome}-${evidencia.capturadoEm}` : "",
+    evidencia?.nome && evidencia?.criadoEm ? `${evidencia.nome}-${evidencia.criadoEm}` : "",
+  ]
+    .filter(Boolean)
+    .map((valor) => String(valor));
+}
+
+async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
+  const base64 = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+    String(valor || "").startsWith("data:image")
+  );
+
+  if (!base64) return false;
+
+  const chaves = chavesCacheEvidenciaVelox(evidencia);
+  await Promise.all(chaves.map((chave) => salvarFotoBase64CacheVelox(chave, base64)));
+  return chaves.length > 0;
+}
+
+async function obterEvidenciaDoCacheLocalVelox(evidencia = {}) {
+  const base64Direto = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+    String(valor || "").startsWith("data:image")
+  );
+  if (base64Direto) return base64Direto;
+
+  const chaves = chavesCacheEvidenciaVelox(evidencia);
+  for (const chave of chaves) {
+    const base64 = await obterFotoBase64CacheVelox(chave);
+    if (base64) return base64;
+  }
+
+  return "";
+}
+
+async function reidratarRespostasPorNormaComCacheLocalVelox(respostasBase = {}) {
+  const respostas = { ...criarRespostasNormas(), ...(respostasBase || {}) };
+  let houveMudanca = false;
+
+  for (const normaId of NORMAS_IDS) {
+    const respostasNorma = respostas[normaId] || {};
+    const novaNorma = { ...respostasNorma };
+
+    for (const [chave, resposta] of Object.entries(respostasNorma)) {
+      const evidencias = Array.isArray(resposta?.evidenciasAnexadas)
+        ? resposta.evidenciasAnexadas
+        : [];
+
+      if (!evidencias.length) continue;
+
+      const evidenciasReidratadas = [];
+
+      for (const evidencia of evidencias) {
+        const base64Cache = await obterEvidenciaDoCacheLocalVelox(evidencia);
+        if (base64Cache && !String(evidencia.data || evidencia.previewLocal || evidencia.base64 || "").startsWith("data:image")) {
+          houveMudanca = true;
+          evidenciasReidratadas.push({
+            ...evidencia,
+            data: base64Cache,
+            previewLocal: base64Cache,
+            base64: base64Cache,
+            miniaturaBase64: evidencia.miniaturaBase64 || base64Cache,
+            thumbnailBase64: evidencia.thumbnailBase64 || evidencia.miniaturaBase64 || base64Cache,
+          });
+        } else {
+          evidenciasReidratadas.push(evidencia);
+        }
+      }
+
+      novaNorma[chave] = {
+        ...resposta,
+        evidenciasAnexadas: evidenciasReidratadas,
+      };
+    }
+
+    respostas[normaId] = novaNorma;
+  }
+
+  return { respostas, houveMudanca };
+}
+
 
 // ADMIN MASTER FIXO PARA AMBIENTE PUBLICADO
 // IMPORTANTE:
@@ -501,16 +658,30 @@ function filtrarInspecoesValidas(lista = []) {
 
 function removerConteudoPesadoImagem(evidencia = {}) {
   if (!evidencia || typeof evidencia !== "object") return evidencia;
-  const urlOnline = evidencia.downloadURL || evidencia.url || "";
+
+  const downloadURL = evidencia.downloadURL || evidencia.url || "";
+  const temUrlOnline = Boolean(downloadURL || evidencia.storagePath);
+
+  // VELOX V3 — Storage Only:
+  // Nunca gravar base64 pesado em localStorage/Firestore/fila offline.
+  // A imagem original e a miniatura ficam no Firebase Storage/IndexedDB.
+  // No objeto salvo ficam somente URLs, paths e metadados leves.
   return {
     ...evidencia,
-    // Nunca gravar base64/dataURL no localStorage. Em celular isso estoura a quota
-    // e causa tela branca/falha no salvamento. A imagem online fica pelo downloadURL.
-    data: String(evidencia.data || "").startsWith("data:image") ? "" : evidencia.data || "",
-    previewLocal: String(evidencia.previewLocal || "").startsWith("data:image") ? "" : evidencia.previewLocal || "",
-    base64: "",
-    downloadURL: evidencia.downloadURL || urlOnline || "",
-    url: urlOnline || "",
+    data: temUrlOnline ? "" : evidencia.data || "",
+    previewLocal: temUrlOnline ? "" : evidencia.previewLocal || "",
+    base64: temUrlOnline ? "" : evidencia.base64 || "",
+    miniaturaBase64: "",
+    thumbnailBase64: "",
+    thumbBase64: "",
+    miniaturaStoragePath: evidencia.miniaturaStoragePath || evidencia.thumbnailStoragePath || "",
+    thumbnailStoragePath: evidencia.thumbnailStoragePath || evidencia.miniaturaStoragePath || "",
+    miniaturaDownloadURL: evidencia.miniaturaDownloadURL || evidencia.thumbnailURL || evidencia.thumbnailDownloadURL || "",
+    thumbnailURL: evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || evidencia.thumbnailDownloadURL || "",
+    thumbnailDownloadURL: evidencia.thumbnailDownloadURL || evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || "",
+    downloadURL: evidencia.downloadURL || downloadURL || "",
+    url: evidencia.url || downloadURL || "",
+    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath),
   };
 }
 
@@ -587,10 +758,59 @@ function lerFilaSyncLocal() {
   );
 }
 
+function criarResumoLeveFilaSync(inspecao = {}) {
+  return {
+    id: inspecao.id,
+    usuarioId: inspecao.usuarioId || "",
+    inspetorNome: inspecao.inspetorNome || "",
+    aeroporto: inspecao.aeroporto || criarSnapshotAeroporto(inspecao.configAerodromo || {}),
+    configAerodromo: inspecao.configAerodromo || {},
+    respostasPorNorma: criarRespostasLevesParaArmazenamentoLocal(reconstruirRespostasPorNorma(inspecao)),
+    criadoEm: inspecao.criadoEm || "",
+    atualizadoEm: inspecao.atualizadoEm || new Date().toISOString(),
+    statusGeral: inspecao.statusGeral || "em_andamento",
+    percentualConcluido: Number(inspecao.percentualConcluido || 0),
+    totalItens: Number(inspecao.totalItens || 0),
+    totalNaoConformidades: Number(inspecao.totalNaoConformidades || 0),
+    pendenteSync: true,
+    sincronizadoOnline: false,
+    ultimoErroSync: inspecao.ultimoErroSync || "",
+  };
+}
+
 function gravarFilaSyncLocal(lista = []) {
-  const validas = filtrarInspecoesValidas(lista);
-  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas.map(criarInspecaoLeveParaStorage)));
-  return validas;
+  const validas = filtrarInspecoesValidas(lista).map(criarResumoLeveFilaSync);
+  try {
+    localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
+    return validas;
+  } catch (erro) {
+    console.warn("Fila offline excedeu a quota local. Gravando fila mínima sem respostas para proteger o app.", erro);
+    const minima = validas.map((insp) => ({
+      id: insp.id,
+      usuarioId: insp.usuarioId || "",
+      inspetorNome: insp.inspetorNome || "",
+      aeroporto: insp.aeroporto || {},
+      configAerodromo: insp.configAerodromo || {},
+      criadoEm: insp.criadoEm || "",
+      atualizadoEm: insp.atualizadoEm || new Date().toISOString(),
+      statusGeral: insp.statusGeral || "em_andamento",
+      percentualConcluido: Number(insp.percentualConcluido || 0),
+      totalItens: Number(insp.totalItens || 0),
+      totalNaoConformidades: Number(insp.totalNaoConformidades || 0),
+      pendenteSync: true,
+      sincronizadoOnline: false,
+      ultimoErroSync: insp.ultimoErroSync || "Fila local reduzida por limite de espaço do navegador.",
+      respostasPorNorma: criarRespostasNormas(),
+    }));
+    try {
+      localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(minima));
+      return minima;
+    } catch (erroMinimo) {
+      console.error("Não foi possível gravar nem a fila mínima offline.", erroMinimo);
+      localStorage.removeItem(STORAGE_KEYS.inspecoesPendentesSync);
+      return [];
+    }
+  }
 }
 
 function adicionarInspecaoNaFilaSync(inspecao) {
@@ -619,17 +839,133 @@ function obterTimestampInspecao(inspecao = {}) {
   return new Date(inspecao.atualizadoEm || inspecao.criadoEm || 0).getTime() || 0;
 }
 
+function chaveEvidencia(ev = {}, indice = 0) {
+  return (
+    ev.id ||
+    ev.storagePath ||
+    ev.downloadURL ||
+    ev.url ||
+    `${ev.nome || "foto"}-${ev.capturadoEm || ev.criadoEm || indice}`
+  );
+}
+
+function temFonteImagem(ev = {}) {
+  return Boolean(
+    ev.data ||
+    ev.previewLocal ||
+    ev.base64 ||
+    ev.downloadURL ||
+    ev.url ||
+    ev.storagePath
+  );
+}
+
+function mesclarEvidenciasPreservandoImagem(novas = [], antigas = []) {
+  const mapa = new Map();
+
+  antigas.forEach((ev, indice) => {
+    mapa.set(chaveEvidencia(ev, indice), ev);
+  });
+
+  novas.forEach((ev, indice) => {
+    const chave = chaveEvidencia(ev, indice);
+    const anterior = mapa.get(chave);
+
+    if (!anterior) {
+      mapa.set(chave, ev);
+      return;
+    }
+
+    // Correção Bug 3: quando o Firebase/Firestore retorna a evidência sem base64
+    // ou sem URL, preserva a fonte de imagem que já existia no estado/localStorage.
+    mapa.set(chave, {
+      ...anterior,
+      ...ev,
+      data: ev.data || anterior.data || "",
+      previewLocal: ev.previewLocal || anterior.previewLocal || "",
+      base64: ev.base64 || anterior.base64 || "",
+      miniaturaBase64: ev.miniaturaBase64 || ev.thumbnailBase64 || anterior.miniaturaBase64 || anterior.thumbnailBase64 || "",
+      thumbnailBase64: ev.thumbnailBase64 || ev.miniaturaBase64 || anterior.thumbnailBase64 || anterior.miniaturaBase64 || "",
+      downloadURL: ev.downloadURL || anterior.downloadURL || anterior.url || "",
+      url: ev.url || ev.downloadURL || anterior.url || anterior.downloadURL || "",
+      storagePath: ev.storagePath || anterior.storagePath || "",
+      imagemSalvaOnline: Boolean(
+        ev.imagemSalvaOnline ||
+        anterior.imagemSalvaOnline ||
+        ev.downloadURL ||
+        ev.url ||
+        ev.storagePath ||
+        anterior.downloadURL ||
+        anterior.url ||
+        anterior.storagePath
+      ),
+    });
+  });
+
+  return Array.from(mapa.values()).filter(temFonteImagem);
+}
+
+function mesclarRespostasPreservandoEvidencias(novas = {}, antigas = {}) {
+  const saida = { ...antigas, ...novas };
+
+  NORMAS_IDS.forEach((normaId) => {
+    const respostasNovas = novas?.[normaId] || {};
+    const respostasAntigas = antigas?.[normaId] || {};
+    const chaves = new Set([...Object.keys(respostasAntigas), ...Object.keys(respostasNovas)]);
+
+    saida[normaId] = { ...(respostasAntigas || {}), ...(respostasNovas || {}) };
+
+    chaves.forEach((chave) => {
+      const novaResposta = respostasNovas[chave] || {};
+      const respostaAntiga = respostasAntigas[chave] || {};
+      const novasEvidencias = Array.isArray(novaResposta.evidenciasAnexadas) ? novaResposta.evidenciasAnexadas : [];
+      const antigasEvidencias = Array.isArray(respostaAntiga.evidenciasAnexadas) ? respostaAntiga.evidenciasAnexadas : [];
+
+      if (novasEvidencias.length || antigasEvidencias.length) {
+        saida[normaId][chave] = {
+          ...respostaAntiga,
+          ...novaResposta,
+          evidenciasAnexadas: mesclarEvidenciasPreservandoImagem(novasEvidencias, antigasEvidencias),
+        };
+      }
+    });
+  });
+
+  return { ...criarRespostasNormas(), ...saida };
+}
+
+function mesclarInspecaoPreservandoEvidencias(nova, antiga) {
+  if (!antiga) return nova;
+
+  return {
+    ...antiga,
+    ...nova,
+    respostasPorNorma: mesclarRespostasPreservandoEvidencias(
+      reconstruirRespostasPorNorma(nova),
+      reconstruirRespostasPorNorma(antiga)
+    ),
+  };
+}
+
 function mesclarInspecoesPorAtualizacao(...listas) {
   const mapa = new Map();
   listas.flat().filter(Boolean).forEach((inspecao) => {
     if (!inspecao?.id) return;
     const existente = mapa.get(inspecao.id);
-    if (!existente || obterTimestampInspecao(inspecao) >= obterTimestampInspecao(existente)) {
+    if (!existente) {
       mapa.set(inspecao.id, inspecao);
+      return;
+    }
+
+    if (obterTimestampInspecao(inspecao) >= obterTimestampInspecao(existente)) {
+      mapa.set(inspecao.id, mesclarInspecaoPreservandoEvidencias(inspecao, existente));
+    } else {
+      mapa.set(inspecao.id, mesclarInspecaoPreservandoEvidencias(existente, inspecao));
     }
   });
   return Array.from(mapa.values()).sort((a, b) => obterTimestampInspecao(b) - obterTimestampInspecao(a));
 }
+
 
 function rolarParaConsultaICAO() {
   if (typeof window === "undefined") return;
@@ -664,15 +1000,53 @@ function baixarEvidenciaNoDispositivo(evidencia, nomePadrao = "evidencia-velox.j
   }
 }
 
-async function urlParaBase64(url) {
-  const resposta = await fetch(url);
-  const blob = await resposta.blob();
-
-  return await new Promise((resolve, reject) => {
+function blobParaBase64(blob) {
+  return new Promise((resolve, reject) => {
     const leitor = new FileReader();
     leitor.onloadend = () => resolve(leitor.result);
     leitor.onerror = reject;
     leitor.readAsDataURL(blob);
+  });
+}
+
+async function urlParaBase64(url) {
+  if (!url) return "";
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 12000) : null;
+  let resposta;
+  try {
+    resposta = await fetch(url, { cache: "no-store", mode: "cors", signal: controller?.signal });
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+  if (!resposta.ok) {
+    throw new Error(`Falha ao buscar imagem: ${resposta.status}`);
+  }
+  const blob = await resposta.blob();
+  if (!String(blob.type || "").startsWith("image/")) {
+    throw new Error(`Arquivo retornado não é imagem: ${blob.type || "sem tipo"}`);
+  }
+  return await blobParaBase64(blob);
+}
+
+function imagemViaCanvasParaBase64(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", 0.88));
+      } catch (erro) {
+        reject(erro);
+      }
+    };
+    img.onerror = reject;
+    img.src = url;
   });
 }
 
@@ -681,26 +1055,381 @@ function extensaoImagem(dataUrl) {
   return "jpeg";
 }
 
-async function prepararImagemParaRelatorio(imagem) {
+function carregarImagemBase64Velox(base64) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = base64;
+  });
+}
+
+async function gerarMiniaturaBase64Velox(fonteBase64, larguraMaxima = 220, qualidade = 0.42) {
   try {
-    const fonte = obterUrlImagemEvidencia(imagem);
-    if (!fonte) return "";
+    if (!String(fonteBase64 || "").startsWith("data:image")) return "";
 
-    if (String(fonte).startsWith("data:image")) {
-      return fonte;
-    }
+    const img = await carregarImagemBase64Velox(fonteBase64);
+    const larguraOriginal = img.naturalWidth || img.width || larguraMaxima;
+    const alturaOriginal = img.naturalHeight || img.height || larguraMaxima;
+    const escala = Math.min(1, larguraMaxima / Math.max(1, larguraOriginal));
+    const largura = Math.max(1, Math.round(larguraOriginal * escala));
+    const altura = Math.max(1, Math.round(alturaOriginal * escala));
 
-    return await urlParaBase64(fonte);
+    const canvas = document.createElement("canvas");
+    canvas.width = largura;
+    canvas.height = altura;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, largura, altura);
+
+    return canvas.toDataURL("image/jpeg", qualidade);
   } catch (erro) {
-    console.error("Erro ao preparar imagem para relatório:", erro);
-    return "";
+    console.warn("Não foi possível gerar miniatura base64 da evidência:", erro);
+    return String(fonteBase64 || "").startsWith("data:image") ? fonteBase64 : "";
   }
 }
 
 
+function lerStringExifVelox(view, offset, count) {
+  let texto = "";
+  for (let i = 0; i < count; i += 1) {
+    const codigo = view.getUint8(offset + i);
+    if (codigo === 0) break;
+    texto += String.fromCharCode(codigo);
+  }
+  return texto.trim();
+}
+
+function lerRacionalExifVelox(view, offset, littleEndian) {
+  const numerador = view.getUint32(offset, littleEndian);
+  const denominador = view.getUint32(offset + 4, littleEndian);
+  if (!denominador) return 0;
+  return numerador / denominador;
+}
+
+function converterDMSToDecimalVelox(valores = [], ref = "") {
+  if (!Array.isArray(valores) || valores.length < 3) return null;
+  const decimal = Number(valores[0] || 0) + Number(valores[1] || 0) / 60 + Number(valores[2] || 0) / 3600;
+  if (!Number.isFinite(decimal)) return null;
+  return String(ref || "").toUpperCase() === "S" || String(ref || "").toUpperCase() === "W"
+    ? decimal * -1
+    : decimal;
+}
+
+function dataExifParaISODateVelox(valor) {
+  const texto = String(valor || "").trim();
+  const match = texto.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (!match) return "";
+  const [, ano, mes, dia, hora, minuto, segundo] = match;
+  return `${ano}-${mes}-${dia}T${hora}:${minuto}:${segundo}`;
+}
+
+function lerValorTagExifVelox(view, tiffStart, entryOffset, littleEndian) {
+  const tag = view.getUint16(entryOffset, littleEndian);
+  const type = view.getUint16(entryOffset + 2, littleEndian);
+  const count = view.getUint32(entryOffset + 4, littleEndian);
+  const valueOffset = entryOffset + 8;
+
+  const bytesPorTipo = {
+    1: 1, // BYTE
+    2: 1, // ASCII
+    3: 2, // SHORT
+    4: 4, // LONG
+    5: 8, // RATIONAL
+    7: 1, // UNDEFINED
+    9: 4, // SLONG
+    10: 8, // SRATIONAL
+  };
+
+  const totalBytes = (bytesPorTipo[type] || 1) * count;
+  const dataOffset = totalBytes <= 4 ? valueOffset : tiffStart + view.getUint32(valueOffset, littleEndian);
+
+  try {
+    if (type === 2) return lerStringExifVelox(view, dataOffset, count);
+    if (type === 3) {
+      if (count === 1) return view.getUint16(dataOffset, littleEndian);
+      return Array.from({ length: count }, (_, i) => view.getUint16(dataOffset + i * 2, littleEndian));
+    }
+    if (type === 4) {
+      if (count === 1) return view.getUint32(dataOffset, littleEndian);
+      return Array.from({ length: count }, (_, i) => view.getUint32(dataOffset + i * 4, littleEndian));
+    }
+    if (type === 5) {
+      if (count === 1) return lerRacionalExifVelox(view, dataOffset, littleEndian);
+      return Array.from({ length: count }, (_, i) => lerRacionalExifVelox(view, dataOffset + i * 8, littleEndian));
+    }
+    if (type === 9) return view.getInt32(dataOffset, littleEndian);
+    if (type === 10) {
+      const numerador = view.getInt32(dataOffset, littleEndian);
+      const denominador = view.getInt32(dataOffset + 4, littleEndian);
+      return denominador ? numerador / denominador : 0;
+    }
+  } catch (erro) {
+    console.warn("Falha ao ler tag EXIF:", tag, erro);
+  }
+
+  return null;
+}
+
+function lerIFDExifVelox(view, tiffStart, offset, littleEndian) {
+  const tags = {};
+  if (!offset) return tags;
+
+  const ifdOffset = tiffStart + offset;
+  const entries = view.getUint16(ifdOffset, littleEndian);
+
+  for (let i = 0; i < entries; i += 1) {
+    const entryOffset = ifdOffset + 2 + i * 12;
+    const tag = view.getUint16(entryOffset, littleEndian);
+    tags[tag] = lerValorTagExifVelox(view, tiffStart, entryOffset, littleEndian);
+  }
+
+  return tags;
+}
+
+async function lerExifImagemVelox(arquivo) {
+  const vazio = {
+    temExif: false,
+    temGPS: false,
+    latitude: null,
+    longitude: null,
+    altitude: null,
+    dataOriginal: "",
+    dataOriginalISO: "",
+    dispositivo: "",
+    fabricante: "",
+    modelo: "",
+    orientacao: null,
+    largura: null,
+    altura: null,
+    fonte: "sem_exif",
+  };
+
+  try {
+    if (!arquivo || !String(arquivo.type || "").includes("jpeg")) return vazio;
+
+    const buffer = await arquivo.arrayBuffer();
+    const view = new DataView(buffer);
+
+    if (view.getUint16(0) !== 0xffd8) return vazio;
+
+    let offset = 2;
+    while (offset < view.byteLength) {
+      const marker = view.getUint16(offset);
+      offset += 2;
+
+      if (marker === 0xffe1) {
+        const tamanho = view.getUint16(offset);
+        offset += 2;
+
+        const exifHeader = lerStringExifVelox(view, offset, 6);
+        if (!exifHeader.startsWith("Exif")) return vazio;
+
+        const tiffStart = offset + 6;
+        const endian = view.getUint16(tiffStart);
+        const littleEndian = endian === 0x4949;
+
+        const primeiroIFDOffset = view.getUint32(tiffStart + 4, littleEndian);
+        const tags0 = lerIFDExifVelox(view, tiffStart, primeiroIFDOffset, littleEndian);
+        const tagsExif = tags0[0x8769] ? lerIFDExifVelox(view, tiffStart, tags0[0x8769], littleEndian) : {};
+        const tagsGPS = tags0[0x8825] ? lerIFDExifVelox(view, tiffStart, tags0[0x8825], littleEndian) : {};
+
+        const latitude = converterDMSToDecimalVelox(tagsGPS[0x0002], tagsGPS[0x0001]);
+        const longitude = converterDMSToDecimalVelox(tagsGPS[0x0004], tagsGPS[0x0003]);
+
+        let altitude = typeof tagsGPS[0x0006] === "number" ? tagsGPS[0x0006] : null;
+        if (altitude !== null && Number(tagsGPS[0x0005]) === 1) altitude *= -1;
+
+        const dataOriginal =
+          tagsExif[0x9003] ||
+          tagsExif[0x9004] ||
+          tags0[0x0132] ||
+          "";
+
+        const fabricante = tags0[0x010f] || "";
+        const modelo = tags0[0x0110] || "";
+        const dispositivo = [fabricante, modelo].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+
+        return {
+          temExif: true,
+          temGPS: latitude !== null && longitude !== null,
+          latitude,
+          longitude,
+          altitude,
+          dataOriginal,
+          dataOriginalISO: dataExifParaISODateVelox(dataOriginal),
+          dispositivo,
+          fabricante,
+          modelo,
+          orientacao: tags0[0x0112] || null,
+          largura: tagsExif[0xa002] || null,
+          altura: tagsExif[0xa003] || null,
+          fonte: latitude !== null && longitude !== null ? "exif_gps" : "exif_sem_gps",
+        };
+      }
+
+      const tamanho = view.getUint16(offset);
+      if (!tamanho || tamanho < 2) break;
+      offset += tamanho;
+    }
+
+    return vazio;
+  } catch (erro) {
+    console.warn("Não foi possível ler EXIF/GPS da imagem:", erro);
+    return vazio;
+  }
+}
+
+function montarGeoAPartirDoExifVelox(exif = {}) {
+  if (!exif?.temGPS || exif.latitude === null || exif.longitude === null) return null;
+
+  const latitude = Number(exif.latitude);
+  const longitude = Number(exif.longitude);
+
+  return {
+    disponivel: true,
+    latitude,
+    longitude,
+    precisao: null,
+    altitude: exif.altitude ?? null,
+    capturadoEm: exif.dataOriginalISO || new Date().toISOString(),
+    linkMaps: `https://www.google.com/maps?q=${latitude},${longitude}`,
+    origem: "exif_gps",
+  };
+}
+
+function montarMetadadosExifVelox(exif = {}, arquivo = {}) {
+  return {
+    temExif: Boolean(exif?.temExif),
+    temGPS: Boolean(exif?.temGPS),
+    fonte: exif?.fonte || "sem_exif",
+    dataOriginal: exif?.dataOriginal || "",
+    dataOriginalISO: exif?.dataOriginalISO || "",
+    dispositivo: exif?.dispositivo || "",
+    fabricante: exif?.fabricante || "",
+    modelo: exif?.modelo || "",
+    orientacao: exif?.orientacao ?? null,
+    largura: exif?.largura ?? null,
+    altura: exif?.altura ?? null,
+    nomeArquivoOriginal: arquivo?.name || "",
+    tamanhoArquivoOriginal: arquivo?.size || null,
+    tipoArquivoOriginal: arquivo?.type || "",
+  };
+}
+
+async function prepararImagemParaRelatorio(imagem) {
+  try {
+    if (!imagem) return "";
+
+    // Prioridade absoluta: miniatura leve salva junto da inspeção.
+    // Ela viaja pelo Firestore e não depende de cache do Chrome, fetch, canvas externo ou CORS.
+    const miniaturaDireta = [imagem.miniaturaBase64, imagem.thumbnailBase64, imagem.thumbBase64].find((valor) =>
+      String(valor || "").startsWith("data:image")
+    );
+    if (miniaturaDireta) {
+      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: miniaturaDireta });
+      return miniaturaDireta;
+    }
+
+    const base64Direto = [imagem.data, imagem.previewLocal, imagem.base64].find((valor) =>
+      String(valor || "").startsWith("data:image")
+    );
+    if (base64Direto) {
+      const miniaturaGerada = await gerarMiniaturaBase64Velox(base64Direto);
+      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: miniaturaGerada || base64Direto });
+      return miniaturaGerada || base64Direto;
+    }
+
+    const base64Cache = await obterEvidenciaDoCacheLocalVelox(imagem);
+    if (base64Cache) return base64Cache;
+
+    const candidatos = [
+      imagem.miniaturaDownloadURL,
+      imagem.thumbnailURL,
+      imagem.thumbnailDownloadURL,
+      imagem.urlMiniatura,
+      imagem.downloadURL,
+      imagem.url,
+      imagem.data,
+      imagem.previewLocal,
+      imagem.base64,
+    ].filter(Boolean);
+
+    if (imagem.storagePath) {
+      try {
+        const urlStorage = await obterDownloadURLPorStoragePath(imagem.storagePath);
+        if (urlStorage) candidatos.unshift(urlStorage);
+      } catch (erroStorage) {
+        console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erroStorage);
+      }
+    }
+
+    const candidatosUnicos = [...new Set(candidatos.map((valor) => String(valor || "").trim()).filter(Boolean))];
+
+    for (const fonte of candidatosUnicos) {
+      try {
+        if (fonte.startsWith("data:image")) {
+          await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: fonte });
+          return fonte;
+        }
+
+        if (fonte.startsWith("http")) {
+          try {
+            const base64Fetch = await urlParaBase64(fonte);
+            if (String(base64Fetch || "").startsWith("data:image")) {
+              await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Fetch, url: fonte });
+              return base64Fetch;
+            }
+          } catch (erroFetch) {
+            console.warn("Fetch da imagem falhou; tentando canvas:", erroFetch);
+          }
+
+          try {
+            const base64Canvas = await imagemViaCanvasParaBase64(fonte);
+            if (String(base64Canvas || "").startsWith("data:image")) {
+              await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Canvas, url: fonte });
+              return base64Canvas;
+            }
+          } catch (erroCanvas) {
+            console.warn("Canvas da imagem falhou:", erroCanvas);
+          }
+        }
+
+        if (fonte.startsWith("blob:")) {
+          try {
+            const base64CanvasBlob = await imagemViaCanvasParaBase64(fonte);
+            if (String(base64CanvasBlob || "").startsWith("data:image")) {
+              await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64CanvasBlob });
+              return base64CanvasBlob;
+            }
+          } catch (erroBlob) {
+            console.warn("Blob/canvas da imagem falhou:", erroBlob);
+          }
+        }
+      } catch (erroCandidato) {
+        console.warn("Falha ao preparar uma fonte de imagem para o relatório:", erroCandidato);
+      }
+    }
+
+    return "";
+  } catch (erro) {
+    console.error("Erro ao preparar imagem para relatório:", erro, imagem);
+    return "";
+  }
+}
+
 function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, itemId = "") {
-  const data = imagem?.data || imagem?.previewLocal || imagem?.base64 || "";
-  const url = imagem?.downloadURL || imagem?.url || "";
+  const miniaturaBase64 = [imagem?.miniaturaBase64, imagem?.thumbnailBase64, imagem?.thumbBase64].find((valor) =>
+    String(valor || "").startsWith("data:image")
+  ) || "";
+
+  const base64 = [miniaturaBase64, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+    String(valor || "").startsWith("data:image")
+  ) || "";
+
+  const urlOnline = [imagem?.miniaturaDownloadURL, imagem?.thumbnailURL, imagem?.thumbnailDownloadURL, imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+    String(valor || "").startsWith("http")
+  ) || "";
+
   const geolocalizacao = imagem?.geolocalizacao || null;
   const latitude = imagem?.latitude ?? geolocalizacao?.latitude ?? null;
   const longitude = imagem?.longitude ?? geolocalizacao?.longitude ?? null;
@@ -712,12 +1441,20 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
 
   return {
     ...imagem,
-    data: data || url,
-    previewLocal: imagem?.previewLocal || data || "",
-    downloadURL: imagem?.downloadURL || url || "",
-    url: url || data || "",
+    data: base64 || imagem?.data || "",
+    previewLocal: base64 || imagem?.previewLocal || "",
+    base64: base64 || imagem?.base64 || "",
+    miniaturaBase64: miniaturaBase64 || imagem?.miniaturaBase64 || imagem?.thumbnailBase64 || "",
+    thumbnailBase64: imagem?.thumbnailBase64 || miniaturaBase64 || imagem?.miniaturaBase64 || "",
+    downloadURL: imagem?.downloadURL || urlOnline || "",
+    url: imagem?.url || imagem?.downloadURL || urlOnline || "",
     storagePath: imagem?.storagePath || "",
-    imagemSalvaOnline: Boolean(imagem?.imagemSalvaOnline || url || imagem?.storagePath),
+    miniaturaStoragePath: imagem?.miniaturaStoragePath || imagem?.thumbnailStoragePath || "",
+    thumbnailStoragePath: imagem?.thumbnailStoragePath || imagem?.miniaturaStoragePath || "",
+    miniaturaDownloadURL: imagem?.miniaturaDownloadURL || imagem?.thumbnailURL || imagem?.thumbnailDownloadURL || "",
+    thumbnailURL: imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || imagem?.thumbnailDownloadURL || "",
+    thumbnailDownloadURL: imagem?.thumbnailDownloadURL || imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || "",
+    imagemSalvaOnline: Boolean(imagem?.imagemSalvaOnline || urlOnline || imagem?.storagePath),
     geolocalizacao,
     latitude,
     longitude,
@@ -831,6 +1568,13 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
           tamanho: ev?.tamanho || ev?.size || null,
+          // Storage Only: não enviar base64/miniaturaBase64 para Firestore.
+          // Miniaturas devem ficar no Firebase Storage e o Firestore guarda só URL/path.
+          miniaturaStoragePath: ev?.miniaturaStoragePath || ev?.thumbnailStoragePath || "",
+          thumbnailStoragePath: ev?.thumbnailStoragePath || ev?.miniaturaStoragePath || "",
+          miniaturaDownloadURL: ev?.miniaturaDownloadURL || ev?.thumbnailURL || ev?.thumbnailDownloadURL || "",
+          thumbnailURL: ev?.thumbnailURL || ev?.miniaturaDownloadURL || ev?.thumbnailDownloadURL || "",
+          thumbnailDownloadURL: ev?.thumbnailDownloadURL || ev?.thumbnailURL || ev?.miniaturaDownloadURL || "",
           criadoEm: ev?.criadoEm || "",
           capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
           enviadoEm: ev?.enviadoEm || "",
@@ -844,6 +1588,31 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           precisaoGPS: ev?.precisaoGPS ?? ev?.precisao ?? ev?.geolocalizacao?.precisao ?? null,
           precisao: ev?.precisao ?? ev?.precisaoGPS ?? ev?.geolocalizacao?.precisao ?? null,
           linkMaps: ev?.linkMaps || ev?.geolocalizacao?.linkMaps || "",
+          origemCaptura: ev?.origemCaptura || "",
+          origemGeolocalizacao: ev?.origemGeolocalizacao || "",
+          dataOriginalExif: ev?.dataOriginalExif || ev?.exif?.dataOriginal || "",
+          dataOriginalExifISO: ev?.dataOriginalExifISO || ev?.exif?.dataOriginalISO || "",
+          dispositivoCaptura: ev?.dispositivoCaptura || ev?.exif?.dispositivo || "",
+          modeloCaptura: ev?.modeloCaptura || ev?.exif?.modelo || "",
+          fabricanteCaptura: ev?.fabricanteCaptura || ev?.exif?.fabricante || "",
+          exif: ev?.exif
+            ? {
+                temExif: Boolean(ev.exif.temExif),
+                temGPS: Boolean(ev.exif.temGPS),
+                fonte: ev.exif.fonte || "",
+                dataOriginal: ev.exif.dataOriginal || "",
+                dataOriginalISO: ev.exif.dataOriginalISO || "",
+                dispositivo: ev.exif.dispositivo || "",
+                fabricante: ev.exif.fabricante || "",
+                modelo: ev.exif.modelo || "",
+                orientacao: ev.exif.orientacao ?? null,
+                largura: ev.exif.largura ?? null,
+                altura: ev.exif.altura ?? null,
+                nomeArquivoOriginal: ev.exif.nomeArquivoOriginal || "",
+                tamanhoArquivoOriginal: ev.exif.tamanhoArquivoOriginal ?? null,
+                tipoArquivoOriginal: ev.exif.tipoArquivoOriginal || "",
+              }
+            : null,
           geolocalizacao: ev?.geolocalizacao
             ? {
                 latitude: ev.geolocalizacao.latitude ?? null,
@@ -1862,11 +2631,11 @@ export default function App() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
                 <label className="upload-evidencia" style={{ width: "100%" }}>
                   📷 Tirar foto
-                  <input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                  <input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files, "camera"); limparInputArquivo(e); }} />
                 </label>
                 <label className="upload-evidencia" style={{ width: "100%" }}>
                   🖼 Anexar da galeria
-                  <input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                  <input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files, "galeria"); limparInputArquivo(e); }} />
                 </label>
               </div>
               {resposta.evidenciasAnexadas?.length > 0 && (
@@ -2012,11 +2781,11 @@ export default function App() {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <label className="upload-evidencia">
                   📷 Tirar foto
-                  <input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                  <input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files, "camera"); limparInputArquivo(e); }} />
                 </label>
                 <label className="upload-evidencia">
                   🖼 Anexar da galeria
-                  <input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} />
+                  <input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files, "galeria"); limparInputArquivo(e); }} />
                 </label>
               </div>
               {resposta.evidenciasAnexadas?.length > 0 && (
@@ -2172,7 +2941,7 @@ export default function App() {
     }
   }
 
-  async function adicionarEvidencias(item, arquivos) {
+  async function adicionarEvidencias(item, arquivos, origemCaptura = "galeria") {
     marcarAlteracaoPendente();
     const chave = item.id || item.ref;
     const listaArquivos = Array.from(arquivos || []).filter((arquivo) =>
@@ -2180,13 +2949,58 @@ export default function App() {
     );
     if (!listaArquivos.length) return;
 
-    const geolocalizacao = await capturarGeolocalizacaoEvidencia();
+    let geolocalizacaoAtualCache = null;
+    let usuarioAutorizouGpsAtualParaGaleria = null;
+
+    async function obterGeolocalizacaoAtualUmaVez() {
+      if (geolocalizacaoAtualCache) return geolocalizacaoAtualCache;
+      geolocalizacaoAtualCache = await capturarGeolocalizacaoEvidencia();
+      return geolocalizacaoAtualCache;
+    }
 
     for (const arquivo of listaArquivos) {
       const agora = new Date().toISOString();
       let previewBase64 = "";
+      let miniaturaBase64 = "";
       let uploadResultado = null;
       let erroUpload = null;
+      let exifInfo = {};
+      let geolocalizacao = null;
+      let origemGeolocalizacao = origemCaptura === "camera" ? "gps_atual_camera" : "sem_gps";
+
+      try {
+        exifInfo = await lerExifImagemVelox(arquivo);
+      } catch (erroExif) {
+        console.warn("EXIF/GPS não lido:", erroExif);
+        exifInfo = {};
+      }
+
+      if (origemCaptura === "galeria" && exifInfo?.temGPS) {
+        geolocalizacao = montarGeoAPartirDoExifVelox(exifInfo);
+        origemGeolocalizacao = "exif_gps_original";
+      } else if (origemCaptura === "camera") {
+        geolocalizacao = await obterGeolocalizacaoAtualUmaVez();
+        origemGeolocalizacao = geolocalizacao?.disponivel ? "gps_atual_camera" : "gps_indisponivel_camera";
+      } else {
+        if (usuarioAutorizouGpsAtualParaGaleria === null) {
+          usuarioAutorizouGpsAtualParaGaleria = window.confirm(
+            "Esta foto da galeria não possui GPS original EXIF acessível. Deseja usar a localização atual do celular como referência?"
+          );
+        }
+
+        if (usuarioAutorizouGpsAtualParaGaleria) {
+          geolocalizacao = await obterGeolocalizacaoAtualUmaVez();
+          origemGeolocalizacao = geolocalizacao?.disponivel ? "gps_atual_confirmado_galeria" : "gps_indisponivel_galeria";
+        } else {
+          geolocalizacao = {
+            disponivel: false,
+            mensagem: "Foto anexada sem GPS EXIF. Usuário optou por não usar GPS atual.",
+            criadoEm: agora,
+            origem: "galeria_sem_gps_confirmado",
+          };
+          origemGeolocalizacao = "galeria_sem_gps_original";
+        }
+      }
 
       try {
         previewBase64 = await arquivoParaBase64(arquivo);
@@ -2197,6 +3011,21 @@ export default function App() {
       }
 
       try {
+        miniaturaBase64 = await gerarMiniaturaBase64Velox(previewBase64, 220, 0.42);
+      } catch (erro) {
+        console.warn("Miniatura não gerada; usando preview local como reserva:", erro);
+        miniaturaBase64 = previewBase64;
+      }
+
+      const latitudeFinal = geolocalizacao?.latitude ?? null;
+      const longitudeFinal = geolocalizacao?.longitude ?? null;
+      const precisaoFinal = geolocalizacao?.precisao ?? null;
+      const capturadoEmFinal =
+        exifInfo?.dataOriginalISO ||
+        geolocalizacao?.capturadoEm ||
+        agora;
+
+      try {
         uploadResultado = await enviarEvidenciaParaStorage({
           arquivo,
           usuario: usuarioLogado,
@@ -2205,12 +3034,16 @@ export default function App() {
           normaId: normaSelecionada,
           itemId: chave,
           previewLocal: previewBase64,
+          miniaturaBase64,
           geolocalizacao,
-          latitude: geolocalizacao?.latitude ?? null,
-          longitude: geolocalizacao?.longitude ?? null,
-          precisaoGPS: geolocalizacao?.precisao ?? null,
-          linkMaps: geolocalizacao?.linkMaps || "",
+          latitude: latitudeFinal,
+          longitude: longitudeFinal,
+          precisaoGPS: precisaoFinal,
+          linkMaps: geolocalizacao?.linkMaps || (latitudeFinal && longitudeFinal ? `https://www.google.com/maps?q=${latitudeFinal},${longitudeFinal}` : ""),
           responsavel: usuarioLogado?.nomeCompleto || "",
+          origemCaptura,
+          origemGeolocalizacao,
+          exif: montarMetadadosExifVelox(exifInfo, arquivo),
         });
       } catch (erro) {
         erroUpload = erro;
@@ -2224,23 +3057,42 @@ export default function App() {
         tamanho: arquivo.size || null,
         data: previewBase64,
         previewLocal: previewBase64,
+        base64: previewBase64,
+        miniaturaBase64: miniaturaBase64 || previewBase64,
+        thumbnailBase64: miniaturaBase64 || previewBase64,
         storagePath: uploadResultado?.storagePath || "",
+        miniaturaStoragePath: uploadResultado?.miniaturaStoragePath || uploadResultado?.thumbnailStoragePath || "",
+        thumbnailStoragePath: uploadResultado?.thumbnailStoragePath || uploadResultado?.miniaturaStoragePath || "",
+        miniaturaDownloadURL: uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.thumbnailDownloadURL || "",
+        thumbnailURL: uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailDownloadURL || "",
+        thumbnailDownloadURL: uploadResultado?.thumbnailDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || "",
         downloadURL: uploadResultado?.downloadURL || "",
         url: uploadResultado?.downloadURL || uploadResultado?.url || "",
         imagemSalvaOnline: Boolean(uploadResultado?.downloadURL || uploadResultado?.storagePath),
         pendenteUpload: Boolean(erroUpload),
         erroUpload: erroUpload ? mensagemErroFirebase(erroUpload) : "",
         criadoEm: agora,
-        capturadoEm: agora,
+        capturadoEm: capturadoEmFinal,
         enviadoEm: uploadResultado?.enviadoEm || "",
         responsavel: usuarioLogado?.nomeCompleto || "",
         itemVinculado: chave,
         geolocalizacao,
-        latitude: geolocalizacao?.latitude ?? null,
-        longitude: geolocalizacao?.longitude ?? null,
-        precisaoGPS: geolocalizacao?.precisao ?? null,
-        linkMaps: geolocalizacao?.linkMaps || "",
+        latitude: latitudeFinal,
+        longitude: longitudeFinal,
+        precisaoGPS: precisaoFinal,
+        precisao: precisaoFinal,
+        linkMaps: geolocalizacao?.linkMaps || (latitudeFinal && longitudeFinal ? `https://www.google.com/maps?q=${latitudeFinal},${longitudeFinal}` : ""),
+        origemCaptura,
+        origemGeolocalizacao,
+        exif: montarMetadadosExifVelox(exifInfo, arquivo),
+        dataOriginalExif: exifInfo?.dataOriginal || "",
+        dataOriginalExifISO: exifInfo?.dataOriginalISO || "",
+        dispositivoCaptura: exifInfo?.dispositivo || "",
+        modeloCaptura: exifInfo?.modelo || "",
+        fabricanteCaptura: exifInfo?.fabricante || "",
       };
+
+      await salvarEvidenciaNoCacheLocalVelox({ ...evidenciaNova, data: evidenciaNova.miniaturaBase64 || evidenciaNova.data });
 
       setRespostasPorNorma((prev) => {
         const respostasNorma = prev[normaSelecionada] || {};
@@ -2621,13 +3473,29 @@ export default function App() {
     try {
       const configSalva = inspecao?.configAerodromo || {};
       const aeroportoSalvo = inspecao?.aeroporto || {};
+      const respostasReconstruidas = reconstruirRespostasPorNorma(inspecao);
+
       setInspecaoAtualId(inspecao.id);
       setConfigAerodromo({ ...CONFIG_INICIAL, ...configSalva });
       setIcao(aeroportoSalvo.icao || configSalva.icao || "");
-      setRespostasPorNorma(reconstruirRespostasPorNorma(inspecao));
+      setRespostasPorNorma(respostasReconstruidas);
       setNormaSelecionada("RBAC153");
-      setMensagemBase(`Inspeção aberta: ${aeroportoSalvo.nome || configSalva.nomeAerodromo || "Aeródromo"}.`);
+      setMensagemBase(`Inspeção aberta: ${aeroportoSalvo.nome || configSalva.nomeAerodromo || "Aeródromo"}. Recarregando fotos salvas...`);
       rolarParaConsultaICAO();
+
+      reidratarRespostasPorNormaComCacheLocalVelox(respostasReconstruidas)
+        .then(({ respostas, houveMudanca }) => {
+          if (houveMudanca) {
+            setRespostasPorNorma(respostas);
+            setMensagemBase(`Inspeção aberta: ${aeroportoSalvo.nome || configSalva.nomeAerodromo || "Aeródromo"}. Fotos reidratadas para visualização e relatório.`);
+          } else {
+            setMensagemBase(`Inspeção aberta: ${aeroportoSalvo.nome || configSalva.nomeAerodromo || "Aeródromo"}.`);
+          }
+        })
+        .catch((erro) => {
+          console.warn("Não foi possível reidratar fotos locais:", erro);
+          setMensagemBase(`Inspeção aberta: ${aeroportoSalvo.nome || configSalva.nomeAerodromo || "Aeródromo"}.`);
+        });
     } catch (erro) {
       console.error("Erro ao abrir inspeção:", erro);
       alert("Não foi possível abrir esta inspeção. O registro pode estar incompleto ou corrompido.");
@@ -2961,7 +3829,7 @@ export default function App() {
     ];
   }
 
-  function montarEvidenciasVCP() {
+  function montarEvidenciasVCP(respostasBase = respostasPorNorma) {
     const lista = [];
 
     obterItensVCPParaRelatorio().forEach((item) => {
@@ -3196,8 +4064,22 @@ export default function App() {
       const altura = doc.internal.pageSize.getHeight();
       const logoBase64 = await urlParaBase64(logoVeloxRelatorio);
       const itensVCP = obterItensVCPParaRelatorio();
-      const evidencias = montarEvidenciasVCP();
-      const finalizacao = respostasPorNorma.VCP?.["VCP-FINALIZACAO"] || {};
+
+      // Bug 3 - Relatório: antes de montar o PDF, tenta reidratar as fotos salvas
+      // no cache local. Isso evita perder as imagens após fechar/reabrir o app.
+      let respostasRelatorio = respostasPorNorma;
+      try {
+        const reidratado = await reidratarRespostasPorNormaComCacheLocalVelox(respostasPorNorma);
+        respostasRelatorio = reidratado.respostas || respostasPorNorma;
+        if (reidratado.houveMudanca) {
+          setRespostasPorNorma(respostasRelatorio);
+        }
+      } catch (erroReidratacao) {
+        console.warn("Reidratação pré-PDF não concluída:", erroReidratacao);
+      }
+
+      const evidencias = montarEvidenciasVCP(respostasRelatorio);
+      const finalizacao = respostasRelatorio.VCP?.["VCP-FINALIZACAO"] || {};
 
       const CORES = {
         grafite: [14, 17, 18],
@@ -3365,11 +4247,19 @@ export default function App() {
       doc.addPage();
       cabecalhoVCP("Cards VCP - Checklist Operacional");
       y = 40;
-      itensVCP.forEach((item) => {
+      for (const item of itensVCP) {
         const chave = item.id || item.ref;
         const resposta = obterRespostaVCP(item);
         const status = resposta.status || "NÃO VERIFICADO";
-        const primeiraFoto = resposta.evidenciasAnexadas?.[0];
+        const primeiraFotoOriginal = Array.isArray(resposta.evidenciasAnexadas)
+          ? resposta.evidenciasAnexadas[0]
+          : null;
+        const primeiraFotoBase64 = primeiraFotoOriginal
+          ? await prepararImagemParaRelatorio(
+              normalizarImagemEvidenciaParaRelatorio(primeiraFotoOriginal, resposta, chave)
+            )
+          : "";
+        const temFotoCard = String(primeiraFotoBase64 || "").startsWith("data:image");
         const itemSemClassificacao = String(item.id || "") === "4.7";
 
         if (y > 232) {
@@ -3396,10 +4286,10 @@ export default function App() {
         doc.setFont(undefined, "normal");
         doc.setFontSize(7.3);
         doc.setTextColor(...CORES.cinza);
-        doc.text(doc.splitTextToSize(item.descricao || "—", primeiraFoto ? 78 : 98), 38, y + 12);
+        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 78 : 98), 38, y + 12);
         doc.setFontSize(7.1);
-        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, primeiraFoto ? 78 : 98), 38, y + 32);
-        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, primeiraFoto ? 78 : 98), 38, y + 42);
+        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 78 : 98), 38, y + 32);
+        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 78 : 98), 38, y + 42);
 
         doc.setFillColor(sc[0], sc[1], sc[2]);
         doc.roundedRect(142, y, 38, 9, 2, 2, "F");
@@ -3417,16 +4307,16 @@ export default function App() {
         doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", 161, y + 34, { align: "center" });
         doc.setFont(undefined, "normal");
 
-        if (primeiraFoto?.data) {
+        if (temFotoCard) {
           try {
-            const formato = extensaoImagem(primeiraFoto.data) === "png" ? "PNG" : "JPEG";
-            doc.addImage(primeiraFoto.data, formato, 108, y + 15, 30, 30);
+            const formato = extensaoImagem(primeiraFotoBase64) === "png" ? "PNG" : "JPEG";
+            doc.addImage(primeiraFotoBase64, formato, 108, y + 15, 30, 30);
           } catch (erro) {
             console.error("Erro ao inserir foto VCP no PDF:", erro);
           }
         }
         y += 64;
-      });
+      }
       rodapeVCP("Cards VCP");
 
       // FINALIZAÇÃO
@@ -3483,7 +4373,9 @@ export default function App() {
             doc.textWithLink("Ver no mapa", 93, y + 50, { url: ev.linkMaps || ev.imagem?.linkMaps });
           }
           try {
-            const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
+            const imagemBase64 =
+              (await prepararImagemParaRelatorio(ev.imagem)) ||
+              (await prepararImagemParaRelatorio(ev));
             if (imagemBase64) {
               const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
               doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
@@ -4687,7 +5579,7 @@ export default function App() {
                 <div className="grid field-grid">
                   <div className="col-6"><label>Responsável<input value={resposta.responsavel || usuarioLogado.nomeCompleto || ""} onChange={(e) => atualizarResposta(item, "responsavel", e.target.value)} placeholder="Responsável" /></label></div>
                   <div className="col-6"><label>Prazo<select value={resposta.prazo || ""} onChange={(e) => atualizarResposta(item, "prazo", e.target.value)}><option value="">Não definido</option><option>IMEDIATO</option><option>CURTO PRAZO</option><option>MÉDIO PRAZO</option><option>LONGO PRAZO</option></select></label></div>
-                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><label className="upload-evidencia">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label><label className="upload-evidencia">🖼 Anexar da galeria<input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files); limparInputArquivo(e); }} /></label></div>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />{ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}<button type="button" onClick={() => baixarEvidenciaNoDispositivo(ev, `${configAerodromo.icao || "VELOX"}-${chave}-${indexEv + 1}.jpg`)}>Salvar foto no celular</button><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
+                  <div className="col-12"><div className="evidencias-box"><strong>Evidências fotográficas</strong><p>Adicione fotos tiradas na hora ou selecione imagens da galeria do celular.</p><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><label className="upload-evidencia">📷 Tirar foto<input type="file" accept="image/*" capture="environment" onChange={(e) => { adicionarEvidencias(item, e.target.files, "camera"); limparInputArquivo(e); }} /></label><label className="upload-evidencia">🖼 Anexar da galeria<input type="file" accept="image/*" multiple onChange={(e) => { adicionarEvidencias(item, e.target.files, "galeria"); limparInputArquivo(e); }} /></label></div>{resposta.evidenciasAnexadas?.length > 0 && (<div className="preview-evidencias">{resposta.evidenciasAnexadas.map((ev, indexEv) => (<div className="preview-card" key={`${ev.nome}-${indexEv}`}><img src={obterUrlImagemEvidencia(ev)} alt={ev.nome} />{ev.pendenteUpload && <small style={{ color: "#f59e0b", fontWeight: 800 }}>Pendente de sincronização</small>}<button type="button" onClick={() => baixarEvidenciaNoDispositivo(ev, `${configAerodromo.icao || "VELOX"}-${chave}-${indexEv + 1}.jpg`)}>Salvar foto no celular</button><button type="button" onClick={() => removerEvidencia(item, indexEv)}>Remover</button></div>))}</div>)}</div></div>
                   <div className="col-12"><label>Observações de campo<textarea value={resposta.obs || ""} onChange={(e) => atualizarResposta(item, "obs", e.target.value)} placeholder="Observações, evidências coletadas, pendências ou recomendações..." /></label></div>
                 </div>
               </article>
@@ -4700,3 +5592,4 @@ export default function App() {
     </div>
   );
 }
+
