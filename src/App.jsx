@@ -4484,60 +4484,106 @@ export default function App() {
       doc.text("Representante do Aeroporto", 152, 251, { align: "center" });
       rodapeVCP("Finalização");
 
-      // FOTOS VINCULADAS
+      // FOTOS VINCULADAS — GALERIA PREMIUM 3 FOTOS POR FOLHA
       if (evidencias.length > 0) {
-        doc.addPage();
-        cabecalhoVCP("Galeria de Evidências Fotográficas");
-        doc.setFontSize(16);
-        doc.setTextColor(...CORES.texto);
-        doc.text("Galeria de Evidências Fotográficas", 14, 40);
-        doc.setFontSize(8.2);
-        doc.setTextColor(...CORES.cinza);
-        doc.text("Cada evidência abaixo mantém somente a referência do item e a fotografia vinculada.", 14, 47);
-        y = 58;
+        const desenharCabecalhoGaleriaVCP = (paginaAtual, totalPaginas) => {
+          const pageW = doc.internal.pageSize.getWidth();
+          const pageH = doc.internal.pageSize.getHeight();
+          desenharDegradeHorizontal(0, 0, pageW, 22);
+          doc.addImage(logoBase64, "PNG", 9, 3.8, 48, 13.2);
+          doc.setFontSize(8.5);
+          doc.setTextColor(255, 255, 255);
+          doc.setFont(undefined, "bold");
+          doc.text("RELATÓRIO DE INSPEÇÃO", pageW - 10, 9, { align: "right" });
+          doc.setFont(undefined, "normal");
+          doc.text(`Evidências Fotográficas • ${paginaAtual}/${totalPaginas}`, pageW - 10, 16, { align: "right" });
 
-        for (const ev of evidencias) {
-          const blocoAltura = 92;
-          y = garantirEspacoPDF(y, blocoAltura + 8, "Galeria de Evidências Fotográficas", "Fotos vinculadas", 40);
-
-          doc.setDrawColor(...CORES.borda);
-          doc.setFillColor(...CORES.fundo);
-          doc.roundedRect(14, y - 5, 182, blocoAltura, 3, 3, "FD");
-
-          doc.setFontSize(9.2);
           doc.setTextColor(17, 83, 37);
           doc.setFont(undefined, "bold");
-          doc.text(`${ev.id} • Referência do item: ${ev.itemId}`, 18, y + 3);
-
+          doc.setFontSize(17);
+          doc.text("EVIDÊNCIAS FOTOGRÁFICAS", 30, 39);
+          doc.setDrawColor(22, 148, 70);
+          doc.setLineWidth(0.35);
+          doc.line(10, 46, pageW - 10, 46);
           doc.setFont(undefined, "normal");
-          doc.setFontSize(7.4);
-          doc.setTextColor(...CORES.cinza);
-          const dataFoto = dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm);
-          doc.text(`Data da evidência: ${dataFoto}`, 18, y + 12);
+          doc.setFontSize(8.2);
+          doc.setTextColor(45, 55, 65);
+          doc.text("Registro fotográfico das evidências coletadas durante a inspeção.", 10, 54);
 
-          if (ev.linkMaps || ev.imagem?.linkMaps) {
-            doc.setTextColor(22, 148, 70);
-            doc.textWithLink("Ver localização no mapa", 18, y + 22, { url: ev.linkMaps || ev.imagem?.linkMaps });
-          }
+          doc.setDrawColor(22, 148, 70);
+          doc.line(10, pageH - 17, pageW - 10, pageH - 17);
+          doc.setFontSize(8);
+          doc.setTextColor(17, 83, 37);
+          doc.setFont(undefined, "bold");
+          doc.text("VELOX", 20, pageH - 8);
+          doc.setFont(undefined, "normal");
+          doc.setTextColor(80, 90, 100);
+          doc.text("Sistema VELOX de Gestão e Inspeção Aeroportuária", pageW / 2, pageH - 8, { align: "center" });
+        };
 
-          try {
-            const imagemBase64 =
-              (await prepararImagemParaRelatorio(ev.imagem)) ||
-              (await prepararImagemParaRelatorio(ev));
-            if (imagemBase64) {
-              adicionarImagemAjustada(doc, imagemBase64, 54, y + 15, 122, 66);
-            } else {
+        const totalPaginasGaleria = Math.max(1, Math.ceil(evidencias.length / 3));
+        for (let pagina = 0; pagina < totalPaginasGaleria; pagina += 1) {
+          doc.addPage("a4", "landscape");
+          desenharCabecalhoGaleriaVCP(pagina + 1, totalPaginasGaleria);
+
+          const pageW = doc.internal.pageSize.getWidth();
+          const cardGap = 5;
+          const margemX = 10;
+          const cardW = (pageW - margemX * 2 - cardGap * 2) / 3;
+          const cardY = 66;
+          const cardH = 118;
+          const fotoY = cardY + 26;
+          const fotoH = 74;
+
+          const grupo = evidencias.slice(pagina * 3, pagina * 3 + 3);
+          for (const [idx, ev] of grupo.entries()) {
+            const x = margemX + idx * (cardW + cardGap);
+            const dataFoto = dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm);
+            const linkMapa = ev.linkMaps || ev.imagem?.linkMaps || "";
+            const responsavelFoto = ev.responsavel || ev.imagem?.responsavel || finalizacao.responsavelVisita || usuarioLogado?.nomeCompleto || "—";
+
+            doc.setDrawColor(...CORES.borda);
+            doc.setFillColor(248, 250, 252);
+            doc.roundedRect(x, cardY, cardW, cardH, 3, 3, "FD");
+
+            doc.setFont(undefined, "bold");
+            doc.setFontSize(9.2);
+            doc.setTextColor(17, 83, 37);
+            doc.text(`${ev.id} • Item: ${ev.itemId}`, x + 4, cardY + 10);
+
+            doc.setFont(undefined, "normal");
+            doc.setFontSize(7.2);
+            doc.setTextColor(45, 55, 65);
+            doc.text(`Data: ${dataFoto}`, x + 4, cardY + 19);
+
+            try {
+              const imagemBase64 =
+                (await prepararImagemParaRelatorio(ev.imagem)) ||
+                (await prepararImagemParaRelatorio(ev));
+              if (imagemBase64) {
+                adicionarImagemAjustada(doc, imagemBase64, x + 4, fotoY, cardW - 8, fotoH);
+              } else {
+                doc.setFontSize(8);
+                doc.setTextColor(239, 68, 68);
+                doc.text("Imagem não disponível.", x + cardW / 2, fotoY + 32, { align: "center" });
+              }
+            } catch (erro) {
+              console.error("Erro ao inserir imagem VCP no PDF:", erro);
               doc.setFontSize(8);
               doc.setTextColor(239, 68, 68);
-              doc.text("Imagem não disponível.", 92, y + 45);
+              doc.text("Imagem não pôde ser renderizada.", x + cardW / 2, fotoY + 32, { align: "center" });
             }
-          } catch (erro) {
-            console.error("Erro ao inserir imagem VCP no PDF:", erro);
-          }
 
-          y += blocoAltura + 8;
+            if (linkMapa) {
+              doc.setTextColor(22, 148, 70);
+              doc.setFontSize(7.2);
+              doc.textWithLink("Ver localização no mapa", x + 4, cardY + cardH - 13, { url: linkMapa });
+            }
+            doc.setTextColor(45, 55, 65);
+            doc.setFontSize(7.0);
+            doc.text(doc.splitTextToSize(`Responsável: ${responsavelFoto}`, cardW - 8), x + 4, cardY + cardH - 5);
+          }
         }
-        rodapeVCP("Fotos vinculadas");
       }
 
       const pdfBlob = doc.output("blob");
@@ -4999,58 +5045,116 @@ export default function App() {
         rodape("Finalização VCP");
       }
 
-      doc.addPage();
-      cabecalho("Evidências Fotográficas");
-      doc.setFontSize(16);
-      doc.setTextColor(10, 31, 18);
-      doc.text("Evidências Fotográficas", 14, 40);
-      y = 52;
-
+      // EVIDÊNCIAS FOTOGRÁFICAS — GALERIA PREMIUM 3 FOTOS POR FOLHA
       if (evidencias.length === 0) {
+        doc.addPage();
+        cabecalho("Evidências Fotográficas");
+        doc.setFontSize(16);
+        doc.setTextColor(10, 31, 18);
+        doc.text("Evidências Fotográficas", 14, 40);
         doc.setFontSize(10);
         doc.setTextColor(80, 90, 100);
-        doc.text("Nenhuma evidência fotográfica foi anexada nesta inspeção.", 14, y);
-      }
+        doc.text("Nenhuma evidência fotográfica foi anexada nesta inspeção.", 14, 54);
+        rodape("Evidências");
+      } else {
+        const desenharCabecalhoGaleria = (paginaAtual, totalPaginas) => {
+          const pageW = doc.internal.pageSize.getWidth();
+          const pageH = doc.internal.pageSize.getHeight();
+          doc.setFillColor(6, 19, 11);
+          doc.rect(0, 0, pageW, 22, "F");
+          doc.addImage(logoBase64, "PNG", 10, 4, 48, 13.1);
+          doc.setFontSize(8.5);
+          doc.setTextColor(255, 255, 255);
+          doc.setFont(undefined, "bold");
+          doc.text("RELATÓRIO DE INSPEÇÃO", pageW - 10, 9, { align: "right" });
+          doc.setFont(undefined, "normal");
+          doc.text(`Evidências Fotográficas • ${paginaAtual}/${totalPaginas}`, pageW - 10, 16, { align: "right" });
 
-      for (const ev of evidencias) {
-        const blocoAltura = 78;
-        if (y + blocoAltura > 262) {
-          doc.addPage();
-          cabecalho("Evidências Fotográficas");
-          y = 38;
-        }
+          doc.setTextColor(17, 83, 37);
+          doc.setFont(undefined, "bold");
+          doc.setFontSize(17);
+          doc.text("EVIDÊNCIAS FOTOGRÁFICAS", 30, 39);
+          doc.setDrawColor(22, 148, 70);
+          doc.setLineWidth(0.35);
+          doc.line(10, 46, pageW - 10, 46);
+          doc.setFont(undefined, "normal");
+          doc.setFontSize(8.2);
+          doc.setTextColor(45, 55, 65);
+          doc.text("Registro fotográfico das evidências coletadas durante a inspeção.", 10, 54);
 
-        doc.setDrawColor(210, 215, 220);
-        doc.setFillColor(248, 250, 252);
-        doc.roundedRect(14, y - 5, 182, blocoAltura, 3, 3, "FD");
-        doc.setFontSize(9);
-        doc.setTextColor(10, 31, 18);
-        doc.text(`${ev.id} • ${ev.normaNome} • Item ${ev.itemId}`, 18, y + 2);
-        doc.setFontSize(7.8);
-        doc.setTextColor(80, 90, 100);
-        doc.text(`Status: ${ev.status}`, 18, y + 14);
-        doc.text(`Data: ${dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm)}`, 18, y + 24);
-        doc.text(doc.splitTextToSize(`Observação: ${ev.observacao || "-"}`, 70), 18, y + 34);
-
-        try {
-          const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
-          if (imagemBase64) {
-            adicionarImagemAjustada(doc, imagemBase64, 94, y - 1, 92, 66);
-          } else {
-            doc.setFontSize(8);
-            doc.setTextColor(239, 68, 68);
-            doc.text("Imagem não disponível.", 108, y + 28);
-          }
-        } catch (erro) {
-          console.error("Erro ao inserir imagem no PDF:", erro);
+          doc.setDrawColor(22, 148, 70);
+          doc.line(10, pageH - 17, pageW - 10, pageH - 17);
           doc.setFontSize(8);
-          doc.setTextColor(239, 68, 68);
-          doc.text("Imagem não pôde ser renderizada.", 108, y + 28);
-        }
-        y += blocoAltura + 7;
-      }
+          doc.setTextColor(17, 83, 37);
+          doc.setFont(undefined, "bold");
+          doc.text("VELOX", 20, pageH - 8);
+          doc.setFont(undefined, "normal");
+          doc.setTextColor(80, 90, 100);
+          doc.text("Sistema VELOX de Gestão e Inspeção Aeroportuária", pageW / 2, pageH - 8, { align: "center" });
+        };
 
-      rodape("Evidências");
+        const totalPaginasGaleria = Math.max(1, Math.ceil(evidencias.length / 3));
+        for (let pagina = 0; pagina < totalPaginasGaleria; pagina += 1) {
+          doc.addPage("a4", "landscape");
+          desenharCabecalhoGaleria(pagina + 1, totalPaginasGaleria);
+
+          const pageW = doc.internal.pageSize.getWidth();
+          const cardGap = 5;
+          const margemX = 10;
+          const cardW = (pageW - margemX * 2 - cardGap * 2) / 3;
+          const cardY = 66;
+          const cardH = 118;
+          const fotoY = cardY + 26;
+          const fotoH = 74;
+
+          const grupo = evidencias.slice(pagina * 3, pagina * 3 + 3);
+          for (const [idx, ev] of grupo.entries()) {
+            const x = margemX + idx * (cardW + cardGap);
+            const dataFoto = dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm);
+            const linkMapa = ev.linkMaps || ev.imagem?.linkMaps || "";
+            const responsavelFoto = ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—";
+
+            doc.setDrawColor(210, 215, 220);
+            doc.setFillColor(248, 250, 252);
+            doc.roundedRect(x, cardY, cardW, cardH, 3, 3, "FD");
+
+            doc.setFont(undefined, "bold");
+            doc.setFontSize(9.2);
+            doc.setTextColor(17, 83, 37);
+            doc.text(`${ev.id} • Item: ${ev.itemId}`, x + 4, cardY + 10);
+
+            doc.setFont(undefined, "normal");
+            doc.setFontSize(7.2);
+            doc.setTextColor(45, 55, 65);
+            doc.text(`Data: ${dataFoto}`, x + 4, cardY + 19);
+
+            try {
+              const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
+              if (imagemBase64) {
+                adicionarImagemAjustada(doc, imagemBase64, x + 4, fotoY, cardW - 8, fotoH);
+              } else {
+                doc.setFontSize(8);
+                doc.setTextColor(239, 68, 68);
+                doc.text("Imagem não disponível.", x + cardW / 2, fotoY + 32, { align: "center" });
+              }
+            } catch (erro) {
+              console.error("Erro ao inserir imagem no PDF:", erro);
+              doc.setFontSize(8);
+              doc.setTextColor(239, 68, 68);
+              doc.text("Imagem não pôde ser renderizada.", x + cardW / 2, fotoY + 32, { align: "center" });
+            }
+
+            if (linkMapa) {
+              doc.setTextColor(22, 148, 70);
+              doc.setFontSize(7.2);
+              doc.textWithLink("Ver localização no mapa", x + 4, cardY + cardH - 13, { url: linkMapa });
+            }
+            doc.setTextColor(45, 55, 65);
+            doc.setFontSize(7.0);
+            doc.text(doc.splitTextToSize(`Responsável: ${responsavelFoto}`, cardW - 8), x + 4, cardY + cardH - 5);
+          }
+        }
+      }
       doc.save(`Relatorio_Completo_${configAerodromo.icao || "VELOX"}.pdf`);
     } catch (erro) {
       console.error(erro);
