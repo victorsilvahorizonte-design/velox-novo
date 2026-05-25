@@ -72,48 +72,6 @@ export async function obterDownloadURLPorStoragePath(storagePath) {
   }
 }
 
-
-function base64ParaBlobVelox(dataUrl) {
-  try {
-    if (!String(dataUrl || "").startsWith("data:")) return null;
-    const [cabecalho, conteudo] = String(dataUrl).split(",");
-    const mime = cabecalho.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
-    const binario = atob(conteudo || "");
-    const bytes = new Uint8Array(binario.length);
-    for (let i = 0; i < binario.length; i += 1) bytes[i] = binario.charCodeAt(i);
-    return new Blob([bytes], { type: mime });
-  } catch (erro) {
-    console.warn("Não foi possível converter miniatura base64 em Blob:", erro);
-    return null;
-  }
-}
-
-async function enviarMiniaturaParaStorage({ miniaturaBase64, storagePath, contentType = "image/jpeg" }) {
-  if (!miniaturaBase64 || !String(miniaturaBase64).startsWith("data:image") || !storagePath) {
-    return { miniaturaStoragePath: "", miniaturaDownloadURL: "" };
-  }
-
-  const blob = base64ParaBlobVelox(miniaturaBase64);
-  if (!blob) return { miniaturaStoragePath: "", miniaturaDownloadURL: "" };
-
-  const ponto = storagePath.lastIndexOf(".");
-  const miniaturaStoragePath = ponto >= 0
-    ? `${storagePath.slice(0, ponto)}-thumb.jpg`
-    : `${storagePath}-thumb.jpg`;
-
-  const miniRef = ref(storage, miniaturaStoragePath);
-  await uploadBytes(miniRef, blob, {
-    contentType: contentType || "image/jpeg",
-    customMetadata: {
-      tipo: "miniatura_relatorio_velox",
-      criadoEm: dataAgoraISO(),
-    },
-  });
-
-  const miniaturaDownloadURL = await getDownloadURL(miniRef);
-  return { miniaturaStoragePath, miniaturaDownloadURL };
-}
-
 export async function enviarEvidenciaParaStorage({
   arquivo,
   usuario,
@@ -167,35 +125,16 @@ export async function enviarEvidenciaParaStorage({
 
   const downloadURL = await getDownloadURL(storageRef);
   const miniatura = miniaturaBase64 || thumbnailBase64 || "";
-  let miniaturaStoragePath = "";
-  let miniaturaDownloadURL = "";
-
-  try {
-    const mini = await enviarMiniaturaParaStorage({
-      miniaturaBase64: miniatura,
-      storagePath,
-      contentType: "image/jpeg",
-    });
-    miniaturaStoragePath = mini.miniaturaStoragePath || "";
-    miniaturaDownloadURL = mini.miniaturaDownloadURL || "";
-  } catch (erroMiniatura) {
-    console.warn("Original enviado, mas miniatura no Storage falhou:", erroMiniatura);
-  }
 
   return {
     storagePath,
     downloadURL,
     url: downloadURL,
-    data: "",
-    previewLocal: "",
-    base64: "",
-    miniaturaBase64: "",
-    thumbnailBase64: "",
-    miniaturaStoragePath,
-    thumbnailStoragePath: miniaturaStoragePath,
-    miniaturaDownloadURL,
-    thumbnailURL: miniaturaDownloadURL,
-    thumbnailDownloadURL: miniaturaDownloadURL,
+    data: previewLocal || "",
+    previewLocal: previewLocal || "",
+    base64: previewLocal || "",
+    miniaturaBase64: miniatura,
+    thumbnailBase64: miniatura,
     imagemSalvaOnline: true,
     enviadoEm: dataAgoraISO(),
     geolocalizacao: geolocalizacao || null,
@@ -234,9 +173,6 @@ export function obterUrlImagemEvidencia(evidencia) {
     evidencia?.miniaturaBase64 ||
     evidencia?.thumbnailBase64 ||
     evidencia?.thumbBase64 ||
-    evidencia?.miniaturaDownloadURL ||
-    evidencia?.thumbnailURL ||
-    evidencia?.thumbnailDownloadURL ||
     evidencia?.data ||
     evidencia?.previewLocal ||
     evidencia?.base64 ||
