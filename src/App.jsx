@@ -142,10 +142,6 @@ function chavesCacheEvidenciaVelox(evidencia = {}) {
   return [
     evidencia?.id,
     evidencia?.storagePath,
-    evidencia?.miniaturaStoragePath,
-    evidencia?.miniaturaDownloadURL,
-    evidencia?.thumbnailStoragePath,
-    evidencia?.thumbnailURL,
     evidencia?.downloadURL,
     evidencia?.url,
     evidencia?.nome && evidencia?.capturadoEm ? `${evidencia.nome}-${evidencia.capturadoEm}` : "",
@@ -156,7 +152,7 @@ function chavesCacheEvidenciaVelox(evidencia = {}) {
 }
 
 async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
-  const base64 = [evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+  const base64 = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
   );
 
@@ -168,7 +164,7 @@ async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
 }
 
 async function obterEvidenciaDoCacheLocalVelox(evidencia = {}) {
-  const base64Direto = [evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+  const base64Direto = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
   );
   if (base64Direto) return base64Direto;
@@ -664,25 +660,28 @@ function removerConteudoPesadoImagem(evidencia = {}) {
   if (!evidencia || typeof evidencia !== "object") return evidencia;
 
   const downloadURL = evidencia.downloadURL || evidencia.url || "";
-  const miniaturaDownloadURL = evidencia.miniaturaDownloadURL || evidencia.thumbnailURL || "";
+  const temUrlOnline = Boolean(downloadURL || evidencia.storagePath);
 
-  // Firestore/localStorage não devem carregar base64 pesado.
-  // Imagens ficam no Firebase Storage; base64 temporário fica só no estado/IndexedDB.
+  // VELOX V3 — Storage Only:
+  // Nunca gravar base64 pesado em localStorage/Firestore/fila offline.
+  // A imagem original e a miniatura ficam no Firebase Storage/IndexedDB.
+  // No objeto salvo ficam somente URLs, paths e metadados leves.
   return {
     ...evidencia,
-    data: "",
-    previewLocal: "",
-    base64: "",
+    data: temUrlOnline ? "" : evidencia.data || "",
+    previewLocal: temUrlOnline ? "" : evidencia.previewLocal || "",
+    base64: temUrlOnline ? "" : evidencia.base64 || "",
     miniaturaBase64: "",
     thumbnailBase64: "",
     thumbBase64: "",
     miniaturaStoragePath: evidencia.miniaturaStoragePath || evidencia.thumbnailStoragePath || "",
-    miniaturaDownloadURL,
     thumbnailStoragePath: evidencia.thumbnailStoragePath || evidencia.miniaturaStoragePath || "",
-    thumbnailURL: evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || "",
+    miniaturaDownloadURL: evidencia.miniaturaDownloadURL || evidencia.thumbnailURL || evidencia.thumbnailDownloadURL || "",
+    thumbnailURL: evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || evidencia.thumbnailDownloadURL || "",
+    thumbnailDownloadURL: evidencia.thumbnailDownloadURL || evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || "",
     downloadURL: evidencia.downloadURL || downloadURL || "",
     url: evidencia.url || downloadURL || "",
-    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath || miniaturaDownloadURL),
+    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath),
   };
 }
 
@@ -759,10 +758,59 @@ function lerFilaSyncLocal() {
   );
 }
 
+function criarResumoLeveFilaSync(inspecao = {}) {
+  return {
+    id: inspecao.id,
+    usuarioId: inspecao.usuarioId || "",
+    inspetorNome: inspecao.inspetorNome || "",
+    aeroporto: inspecao.aeroporto || criarSnapshotAeroporto(inspecao.configAerodromo || {}),
+    configAerodromo: inspecao.configAerodromo || {},
+    respostasPorNorma: criarRespostasLevesParaArmazenamentoLocal(reconstruirRespostasPorNorma(inspecao)),
+    criadoEm: inspecao.criadoEm || "",
+    atualizadoEm: inspecao.atualizadoEm || new Date().toISOString(),
+    statusGeral: inspecao.statusGeral || "em_andamento",
+    percentualConcluido: Number(inspecao.percentualConcluido || 0),
+    totalItens: Number(inspecao.totalItens || 0),
+    totalNaoConformidades: Number(inspecao.totalNaoConformidades || 0),
+    pendenteSync: true,
+    sincronizadoOnline: false,
+    ultimoErroSync: inspecao.ultimoErroSync || "",
+  };
+}
+
 function gravarFilaSyncLocal(lista = []) {
-  const validas = filtrarInspecoesValidas(lista);
-  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas.map(criarInspecaoLeveParaStorage)));
-  return validas;
+  const validas = filtrarInspecoesValidas(lista).map(criarResumoLeveFilaSync);
+  try {
+    localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
+    return validas;
+  } catch (erro) {
+    console.warn("Fila offline excedeu a quota local. Gravando fila mínima sem respostas para proteger o app.", erro);
+    const minima = validas.map((insp) => ({
+      id: insp.id,
+      usuarioId: insp.usuarioId || "",
+      inspetorNome: insp.inspetorNome || "",
+      aeroporto: insp.aeroporto || {},
+      configAerodromo: insp.configAerodromo || {},
+      criadoEm: insp.criadoEm || "",
+      atualizadoEm: insp.atualizadoEm || new Date().toISOString(),
+      statusGeral: insp.statusGeral || "em_andamento",
+      percentualConcluido: Number(insp.percentualConcluido || 0),
+      totalItens: Number(insp.totalItens || 0),
+      totalNaoConformidades: Number(insp.totalNaoConformidades || 0),
+      pendenteSync: true,
+      sincronizadoOnline: false,
+      ultimoErroSync: insp.ultimoErroSync || "Fila local reduzida por limite de espaço do navegador.",
+      respostasPorNorma: criarRespostasNormas(),
+    }));
+    try {
+      localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(minima));
+      return minima;
+    } catch (erroMinimo) {
+      console.error("Não foi possível gravar nem a fila mínima offline.", erroMinimo);
+      localStorage.removeItem(STORAGE_KEYS.inspecoesPendentesSync);
+      return [];
+    }
+  }
 }
 
 function adicionarInspecaoNaFilaSync(inspecao) {
@@ -806,12 +854,9 @@ function temFonteImagem(ev = {}) {
     ev.data ||
     ev.previewLocal ||
     ev.base64 ||
-    ev.miniaturaDownloadURL ||
-    ev.thumbnailURL ||
     ev.downloadURL ||
     ev.url ||
-    ev.storagePath ||
-    ev.miniaturaStoragePath
+    ev.storagePath
   );
 }
 
@@ -841,10 +886,6 @@ function mesclarEvidenciasPreservandoImagem(novas = [], antigas = []) {
       base64: ev.base64 || anterior.base64 || "",
       miniaturaBase64: ev.miniaturaBase64 || ev.thumbnailBase64 || anterior.miniaturaBase64 || anterior.thumbnailBase64 || "",
       thumbnailBase64: ev.thumbnailBase64 || ev.miniaturaBase64 || anterior.thumbnailBase64 || anterior.miniaturaBase64 || "",
-      miniaturaStoragePath: ev.miniaturaStoragePath || ev.thumbnailStoragePath || anterior.miniaturaStoragePath || anterior.thumbnailStoragePath || "",
-      miniaturaDownloadURL: ev.miniaturaDownloadURL || ev.thumbnailURL || anterior.miniaturaDownloadURL || anterior.thumbnailURL || "",
-      thumbnailStoragePath: ev.thumbnailStoragePath || ev.miniaturaStoragePath || anterior.thumbnailStoragePath || anterior.miniaturaStoragePath || "",
-      thumbnailURL: ev.thumbnailURL || ev.miniaturaDownloadURL || anterior.thumbnailURL || anterior.miniaturaDownloadURL || "",
       downloadURL: ev.downloadURL || anterior.downloadURL || anterior.url || "",
       url: ev.url || ev.downloadURL || anterior.url || anterior.downloadURL || "",
       storagePath: ev.storagePath || anterior.storagePath || "",
@@ -1304,6 +1345,8 @@ async function prepararImagemParaRelatorio(imagem) {
     const candidatos = [
       imagem.miniaturaDownloadURL,
       imagem.thumbnailURL,
+      imagem.thumbnailDownloadURL,
+      imagem.urlMiniatura,
       imagem.downloadURL,
       imagem.url,
       imagem.data,
@@ -1311,19 +1354,10 @@ async function prepararImagemParaRelatorio(imagem) {
       imagem.base64,
     ].filter(Boolean);
 
-    if (imagem.miniaturaStoragePath || imagem.thumbnailStoragePath) {
-      try {
-        const urlMiniatura = await obterDownloadURLPorStoragePath(imagem.miniaturaStoragePath || imagem.thumbnailStoragePath);
-        if (urlMiniatura) candidatos.unshift(urlMiniatura);
-      } catch (erroStorageMiniatura) {
-        console.warn("Não foi possível recuperar miniatura pelo storagePath:", erroStorageMiniatura);
-      }
-    }
-
     if (imagem.storagePath) {
       try {
         const urlStorage = await obterDownloadURLPorStoragePath(imagem.storagePath);
-        if (urlStorage) candidatos.push(urlStorage);
+        if (urlStorage) candidatos.unshift(urlStorage);
       } catch (erroStorage) {
         console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erroStorage);
       }
@@ -1392,7 +1426,7 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
     String(valor || "").startsWith("data:image")
   ) || "";
 
-  const urlOnline = [imagem?.miniaturaDownloadURL, imagem?.thumbnailURL, imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+  const urlOnline = [imagem?.miniaturaDownloadURL, imagem?.thumbnailURL, imagem?.thumbnailDownloadURL, imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
     String(valor || "").startsWith("http")
   ) || "";
 
@@ -1412,13 +1446,14 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
     base64: base64 || imagem?.base64 || "",
     miniaturaBase64: miniaturaBase64 || imagem?.miniaturaBase64 || imagem?.thumbnailBase64 || "",
     thumbnailBase64: imagem?.thumbnailBase64 || miniaturaBase64 || imagem?.miniaturaBase64 || "",
-    miniaturaStoragePath: imagem?.miniaturaStoragePath || imagem?.thumbnailStoragePath || "",
-    miniaturaDownloadURL: imagem?.miniaturaDownloadURL || imagem?.thumbnailURL || "",
-    thumbnailStoragePath: imagem?.thumbnailStoragePath || imagem?.miniaturaStoragePath || "",
-    thumbnailURL: imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || "",
-    downloadURL: imagem?.downloadURL || "",
+    downloadURL: imagem?.downloadURL || urlOnline || "",
     url: imagem?.url || imagem?.downloadURL || urlOnline || "",
     storagePath: imagem?.storagePath || "",
+    miniaturaStoragePath: imagem?.miniaturaStoragePath || imagem?.thumbnailStoragePath || "",
+    thumbnailStoragePath: imagem?.thumbnailStoragePath || imagem?.miniaturaStoragePath || "",
+    miniaturaDownloadURL: imagem?.miniaturaDownloadURL || imagem?.thumbnailURL || imagem?.thumbnailDownloadURL || "",
+    thumbnailURL: imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || imagem?.thumbnailDownloadURL || "",
+    thumbnailDownloadURL: imagem?.thumbnailDownloadURL || imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || "",
     imagemSalvaOnline: Boolean(imagem?.imagemSalvaOnline || urlOnline || imagem?.storagePath),
     geolocalizacao,
     latitude,
@@ -1485,13 +1520,7 @@ function sanitizarValorFirebase(valor) {
   if (valor === undefined) return null;
   if (valor === null) return null;
 
-  if (typeof valor === "string") {
-    // Blindagem Firestore: nenhum dataURL/base64 deve ser salvo em documento.
-    if (valor.startsWith("data:image")) return "";
-    return valor;
-  }
-
-  if (typeof valor === "number" || typeof valor === "boolean") {
+  if (typeof valor === "string" || typeof valor === "number" || typeof valor === "boolean") {
     return valor;
   }
 
@@ -1539,12 +1568,13 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
           tamanho: ev?.tamanho || ev?.size || null,
-          // Firestore deve ficar leve: NUNCA salvar base64/miniaturaBase64 aqui.
-          // Miniatura para PDF fica no Firebase Storage, referenciada por URL/path.
+          // Storage Only: não enviar base64/miniaturaBase64 para Firestore.
+          // Miniaturas devem ficar no Firebase Storage e o Firestore guarda só URL/path.
           miniaturaStoragePath: ev?.miniaturaStoragePath || ev?.thumbnailStoragePath || "",
-          miniaturaDownloadURL: ev?.miniaturaDownloadURL || ev?.thumbnailURL || "",
           thumbnailStoragePath: ev?.thumbnailStoragePath || ev?.miniaturaStoragePath || "",
-          thumbnailURL: ev?.thumbnailURL || ev?.miniaturaDownloadURL || "",
+          miniaturaDownloadURL: ev?.miniaturaDownloadURL || ev?.thumbnailURL || ev?.thumbnailDownloadURL || "",
+          thumbnailURL: ev?.thumbnailURL || ev?.miniaturaDownloadURL || ev?.thumbnailDownloadURL || "",
+          thumbnailDownloadURL: ev?.thumbnailDownloadURL || ev?.thumbnailURL || ev?.miniaturaDownloadURL || "",
           criadoEm: ev?.criadoEm || "",
           capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
           enviadoEm: ev?.enviadoEm || "",
@@ -3025,17 +3055,17 @@ export default function App() {
         nome: arquivo.name || `foto-${Date.now()}.jpg`,
         tipo: arquivo.type || "image/jpeg",
         tamanho: arquivo.size || null,
-        data: "",
-        previewLocal: "",
-        base64: "",
-        // Mantida apenas no estado atual/IndexedDB para preview imediato; não vai ao Firestore.
-        miniaturaBase64: miniaturaBase64 || "",
-        thumbnailBase64: miniaturaBase64 || "",
-        miniaturaStoragePath: uploadResultado?.miniaturaStoragePath || uploadResultado?.thumbnailStoragePath || "",
-        miniaturaDownloadURL: uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailURL || "",
-        thumbnailStoragePath: uploadResultado?.thumbnailStoragePath || uploadResultado?.miniaturaStoragePath || "",
-        thumbnailURL: uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || "",
+        data: previewBase64,
+        previewLocal: previewBase64,
+        base64: previewBase64,
+        miniaturaBase64: miniaturaBase64 || previewBase64,
+        thumbnailBase64: miniaturaBase64 || previewBase64,
         storagePath: uploadResultado?.storagePath || "",
+        miniaturaStoragePath: uploadResultado?.miniaturaStoragePath || uploadResultado?.thumbnailStoragePath || "",
+        thumbnailStoragePath: uploadResultado?.thumbnailStoragePath || uploadResultado?.miniaturaStoragePath || "",
+        miniaturaDownloadURL: uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.thumbnailDownloadURL || "",
+        thumbnailURL: uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailDownloadURL || "",
+        thumbnailDownloadURL: uploadResultado?.thumbnailDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || "",
         downloadURL: uploadResultado?.downloadURL || "",
         url: uploadResultado?.downloadURL || uploadResultado?.url || "",
         imagemSalvaOnline: Boolean(uploadResultado?.downloadURL || uploadResultado?.storagePath),
@@ -4231,8 +4261,45 @@ export default function App() {
           : "";
         const temFotoCard = String(primeiraFotoBase64 || "").startsWith("data:image");
         const itemSemClassificacao = String(item.id || "") === "4.7";
+        const sc = statusColor(status);
 
-        if (y > 232) {
+        // Layout Premium VELOX — card dinâmico em duas colunas reais.
+        // Evita que foto sobreponha texto quando descrição, condição ou observação são longas.
+        const cardX = 14;
+        const cardW = 182;
+        const padding = 6;
+        const numeroW = 16;
+        const fotoW = temFotoCard ? 48 : 0;
+        const gapFoto = temFotoCard ? 6 : 0;
+        const textoX = cardX + padding + numeroW + 4;
+        const textoW = cardW - padding * 2 - numeroW - 4 - fotoW - gapFoto - 6;
+        const fotoX = cardX + cardW - padding - fotoW;
+        const topoConteudo = y + 7;
+
+        doc.setFont(undefined, "bold");
+        doc.setFontSize(9.2);
+        const linhasTitulo = doc.splitTextToSize(item.titulo || item.item || "Item VCP", textoW);
+        doc.setFont(undefined, "normal");
+        doc.setFontSize(7.3);
+        const linhasDescricao = doc.splitTextToSize(item.descricao || "—", textoW);
+        doc.setFontSize(7.1);
+        const linhasCondicao = doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, textoW);
+        const linhasObs = doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, textoW);
+
+        const alturaTexto =
+          8 +
+          linhasTitulo.length * 4.2 +
+          2 +
+          linhasDescricao.length * 3.7 +
+          3 +
+          linhasCondicao.length * 3.6 +
+          3 +
+          linhasObs.length * 3.6 +
+          8;
+        const alturaFoto = temFotoCard ? 50 : 0;
+        const cardH = Math.max(58, alturaTexto, alturaFoto + 18);
+
+        if (y + cardH > 265) {
           rodapeVCP("Cards VCP");
           doc.addPage();
           cabecalhoVCP("Cards VCP - Checklist Operacional");
@@ -4241,51 +4308,72 @@ export default function App() {
 
         doc.setDrawColor(...CORES.borda);
         doc.setFillColor(255, 255, 255);
-        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
-        const sc = statusColor(status);
+        doc.roundedRect(cardX, y - 5, cardW, cardH, 3, 3, "FD");
+
+        // Faixa discreta de identificação do item
         doc.setFillColor(sc[0], sc[1], sc[2]);
-        doc.roundedRect(18, y, 14, 12, 2, 2, "F");
-        doc.setFontSize(8.5);
+        doc.roundedRect(cardX + padding - 1, y + 2, numeroW, 12, 2, 2, "F");
+        doc.setFontSize(8.2);
         doc.setTextColor(255, 255, 255);
         doc.setFont(undefined, "bold");
-        doc.text(String(chave), 25, y + 8, { align: "center" });
+        doc.text(String(chave), cardX + padding - 1 + numeroW / 2, y + 10, { align: "center" });
 
+        // Coluna de texto
+        let textoY = y + 5;
         doc.setTextColor(...CORES.texto);
         doc.setFontSize(9.2);
-        doc.text(item.titulo || item.item || "Item VCP", 38, y + 4);
+        doc.setFont(undefined, "bold");
+        doc.text(linhasTitulo, textoX, textoY);
+        textoY += linhasTitulo.length * 4.2 + 3;
+
         doc.setFont(undefined, "normal");
         doc.setFontSize(7.3);
         doc.setTextColor(...CORES.cinza);
-        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 78 : 98), 38, y + 12);
-        doc.setFontSize(7.1);
-        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 78 : 98), 38, y + 32);
-        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 78 : 98), 38, y + 42);
+        doc.text(linhasDescricao, textoX, textoY);
+        textoY += linhasDescricao.length * 3.7 + 4;
 
+        doc.setFontSize(7.1);
+        doc.text(linhasCondicao, textoX, textoY);
+        textoY += linhasCondicao.length * 3.6 + 4;
+        doc.text(linhasObs, textoX, textoY);
+
+        // Coluna direita: status/classificação/foto, sem invadir texto
+        const colunaX = temFotoCard ? fotoX : 145;
+        const colunaW = temFotoCard ? fotoW : 38;
         doc.setFillColor(sc[0], sc[1], sc[2]);
-        doc.roundedRect(142, y, 38, 9, 2, 2, "F");
+        doc.roundedRect(colunaX, y + 2, colunaW, 9, 2, 2, "F");
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(6.8);
+        doc.setFontSize(6.4);
         doc.setFont(undefined, "bold");
-        doc.text(status, 161, y + 6, { align: "center" });
+        doc.text(status, colunaX + colunaW / 2, y + 8, { align: "center" });
         doc.setFont(undefined, "normal");
+
         doc.setTextColor(...CORES.cinza);
-        doc.setFontSize(7.2);
-        doc.text("Classificação:", 151, y + 22, { align: "center" });
-        doc.setFontSize(13);
+        doc.setFontSize(6.8);
+        doc.text("Classificação", colunaX + colunaW / 2, y + 16, { align: "center" });
+        doc.setFontSize(11.5);
         doc.setTextColor(sc[0], sc[1], sc[2]);
         doc.setFont(undefined, "bold");
-        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", 161, y + 34, { align: "center" });
+        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", colunaX + colunaW / 2, y + 25, { align: "center" });
         doc.setFont(undefined, "normal");
 
         if (temFotoCard) {
           try {
             const formato = extensaoImagem(primeiraFotoBase64) === "png" ? "PNG" : "JPEG";
-            doc.addImage(primeiraFotoBase64, formato, 108, y + 15, 30, 30);
+            const imgW = 44;
+            const imgH = 34;
+            const imgX = fotoX + (fotoW - imgW) / 2;
+            const imgY = y + 30;
+            doc.setDrawColor(226, 232, 240);
+            doc.setFillColor(248, 250, 252);
+            doc.roundedRect(imgX - 1.5, imgY - 1.5, imgW + 3, imgH + 3, 2, 2, "FD");
+            doc.addImage(primeiraFotoBase64, formato, imgX, imgY, imgW, imgH);
           } catch (erro) {
             console.error("Erro ao inserir foto VCP no PDF:", erro);
           }
         }
-        y += 64;
+
+        y += cardH + 8;
       }
       rodapeVCP("Cards VCP");
 
