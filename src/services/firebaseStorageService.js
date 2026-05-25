@@ -27,6 +27,30 @@ function extensaoArquivo(nome = "", tipo = "") {
   return "jpg";
 }
 
+function base64ParaBlobVelox(base64 = "") {
+  if (!String(base64 || "").startsWith("data:image")) return null;
+  try {
+    const [cabecalho, dados] = String(base64).split(",");
+    const mime = (cabecalho.match(/data:(.*?);base64/) || [])[1] || "image/jpeg";
+    const binario = atob(dados || "");
+    const bytes = new Uint8Array(binario.length);
+    for (let i = 0; i < binario.length; i += 1) bytes[i] = binario.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  } catch (erro) {
+    console.warn("Não foi possível converter miniatura base64 para Blob:", erro);
+    return null;
+  }
+}
+
+function montarCaminhoMiniaturaStorage(storagePath = "") {
+  if (!storagePath) return "";
+  const partes = String(storagePath).split("/");
+  const nome = partes.pop() || `thumb-${Date.now()}.jpg`;
+  const nomeSemExt = nome.replace(/\.[^.]+$/, "");
+  partes.push("miniaturas", `${nomeSemExt}-thumb.jpg`);
+  return partes.join("/");
+}
+
 export function montarCaminhoEvidenciaStorage({
   usuario,
   inspecaoId,
@@ -70,48 +94,6 @@ export async function obterDownloadURLPorStoragePath(storagePath) {
     console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erro);
     return "";
   }
-}
-
-
-function base64ParaBlobVelox(dataUrl) {
-  try {
-    if (!String(dataUrl || "").startsWith("data:")) return null;
-    const [cabecalho, conteudo] = String(dataUrl).split(",");
-    const mime = cabecalho.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
-    const binario = atob(conteudo || "");
-    const bytes = new Uint8Array(binario.length);
-    for (let i = 0; i < binario.length; i += 1) bytes[i] = binario.charCodeAt(i);
-    return new Blob([bytes], { type: mime });
-  } catch (erro) {
-    console.warn("Não foi possível converter miniatura base64 em Blob:", erro);
-    return null;
-  }
-}
-
-async function enviarMiniaturaParaStorage({ miniaturaBase64, storagePath, contentType = "image/jpeg" }) {
-  if (!miniaturaBase64 || !String(miniaturaBase64).startsWith("data:image") || !storagePath) {
-    return { miniaturaStoragePath: "", miniaturaDownloadURL: "" };
-  }
-
-  const blob = base64ParaBlobVelox(miniaturaBase64);
-  if (!blob) return { miniaturaStoragePath: "", miniaturaDownloadURL: "" };
-
-  const ponto = storagePath.lastIndexOf(".");
-  const miniaturaStoragePath = ponto >= 0
-    ? `${storagePath.slice(0, ponto)}-thumb.jpg`
-    : `${storagePath}-thumb.jpg`;
-
-  const miniRef = ref(storage, miniaturaStoragePath);
-  await uploadBytes(miniRef, blob, {
-    contentType: contentType || "image/jpeg",
-    customMetadata: {
-      tipo: "miniatura_relatorio_velox",
-      criadoEm: dataAgoraISO(),
-    },
-  });
-
-  const miniaturaDownloadURL = await getDownloadURL(miniRef);
-  return { miniaturaStoragePath, miniaturaDownloadURL };
 }
 
 export async function enviarEvidenciaParaStorage({
@@ -166,36 +148,49 @@ export async function enviarEvidenciaParaStorage({
   });
 
   const downloadURL = await getDownloadURL(storageRef);
+
+  // Arquitetura V3 VELOX: imagem pesada nunca vai para o Firestore.
+  // A miniatura do PDF também é salva no Firebase Storage e o Firestore guarda só URL/path.
   const miniatura = miniaturaBase64 || thumbnailBase64 || "";
   let miniaturaStoragePath = "";
   let miniaturaDownloadURL = "";
 
-  try {
-    const mini = await enviarMiniaturaParaStorage({
-      miniaturaBase64: miniatura,
-      storagePath,
-      contentType: "image/jpeg",
-    });
-    miniaturaStoragePath = mini.miniaturaStoragePath || "";
-    miniaturaDownloadURL = mini.miniaturaDownloadURL || "";
-  } catch (erroMiniatura) {
-    console.warn("Original enviado, mas miniatura no Storage falhou:", erroMiniatura);
+  const miniaturaBlob = base64ParaBlobVelox(miniatura);
+  if (miniaturaBlob) {
+    try {
+      miniaturaStoragePath = montarCaminhoMiniaturaStorage(storagePath);
+      const thumbRef = ref(storage, miniaturaStoragePath);
+      await uploadBytes(thumbRef, miniaturaBlob, {
+        contentType: "image/jpeg",
+        customMetadata: {
+          usuario: usuario?.email || usuario?.id || "",
+          inspecaoId: inspecaoId || "",
+          icao: icao || "",
+          normaId: normaId || "",
+          itemId: itemId || "",
+          tipo: "miniatura-pdf",
+          enviadoEm: dataAgoraISO(),
+        },
+      });
+      miniaturaDownloadURL = await getDownloadURL(thumbRef);
+    } catch (erroThumb) {
+      console.warn("Miniatura não foi salva no Storage; relatório usará cache local quando disponível:", erroThumb);
+    }
   }
 
   return {
     storagePath,
     downloadURL,
     url: downloadURL,
+    miniaturaStoragePath,
+    miniaturaDownloadURL,
+    thumbnailStoragePath: miniaturaStoragePath,
+    thumbnailURL: miniaturaDownloadURL,
     data: "",
     previewLocal: "",
     base64: "",
     miniaturaBase64: "",
     thumbnailBase64: "",
-    miniaturaStoragePath,
-    thumbnailStoragePath: miniaturaStoragePath,
-    miniaturaDownloadURL,
-    thumbnailURL: miniaturaDownloadURL,
-    thumbnailDownloadURL: miniaturaDownloadURL,
     imagemSalvaOnline: true,
     enviadoEm: dataAgoraISO(),
     geolocalizacao: geolocalizacao || null,
@@ -236,7 +231,6 @@ export function obterUrlImagemEvidencia(evidencia) {
     evidencia?.thumbBase64 ||
     evidencia?.miniaturaDownloadURL ||
     evidencia?.thumbnailURL ||
-    evidencia?.thumbnailDownloadURL ||
     evidencia?.data ||
     evidencia?.previewLocal ||
     evidencia?.base64 ||

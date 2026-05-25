@@ -142,6 +142,10 @@ function chavesCacheEvidenciaVelox(evidencia = {}) {
   return [
     evidencia?.id,
     evidencia?.storagePath,
+    evidencia?.miniaturaStoragePath,
+    evidencia?.miniaturaDownloadURL,
+    evidencia?.thumbnailStoragePath,
+    evidencia?.thumbnailURL,
     evidencia?.downloadURL,
     evidencia?.url,
     evidencia?.nome && evidencia?.capturadoEm ? `${evidencia.nome}-${evidencia.capturadoEm}` : "",
@@ -152,7 +156,7 @@ function chavesCacheEvidenciaVelox(evidencia = {}) {
 }
 
 async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
-  const base64 = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+  const base64 = [evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
   );
 
@@ -164,7 +168,7 @@ async function salvarEvidenciaNoCacheLocalVelox(evidencia = {}) {
 }
 
 async function obterEvidenciaDoCacheLocalVelox(evidencia = {}) {
-  const base64Direto = [evidencia.miniaturaBase64, evidencia.thumbnailBase64, evidencia.thumbBase64, evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
+  const base64Direto = [evidencia.data, evidencia.previewLocal, evidencia.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
   );
   if (base64Direto) return base64Direto;
@@ -660,28 +664,25 @@ function removerConteudoPesadoImagem(evidencia = {}) {
   if (!evidencia || typeof evidencia !== "object") return evidencia;
 
   const downloadURL = evidencia.downloadURL || evidencia.url || "";
-  const temUrlOnline = Boolean(downloadURL || evidencia.storagePath);
+  const miniaturaDownloadURL = evidencia.miniaturaDownloadURL || evidencia.thumbnailURL || "";
 
-  // VELOX V3 — Storage Only:
-  // Nunca gravar base64 pesado em localStorage/Firestore/fila offline.
-  // A imagem original e a miniatura ficam no Firebase Storage/IndexedDB.
-  // No objeto salvo ficam somente URLs, paths e metadados leves.
+  // Firestore/localStorage não devem carregar base64 pesado.
+  // Imagens ficam no Firebase Storage; base64 temporário fica só no estado/IndexedDB.
   return {
     ...evidencia,
-    data: temUrlOnline ? "" : evidencia.data || "",
-    previewLocal: temUrlOnline ? "" : evidencia.previewLocal || "",
-    base64: temUrlOnline ? "" : evidencia.base64 || "",
+    data: "",
+    previewLocal: "",
+    base64: "",
     miniaturaBase64: "",
     thumbnailBase64: "",
     thumbBase64: "",
     miniaturaStoragePath: evidencia.miniaturaStoragePath || evidencia.thumbnailStoragePath || "",
+    miniaturaDownloadURL,
     thumbnailStoragePath: evidencia.thumbnailStoragePath || evidencia.miniaturaStoragePath || "",
-    miniaturaDownloadURL: evidencia.miniaturaDownloadURL || evidencia.thumbnailURL || evidencia.thumbnailDownloadURL || "",
-    thumbnailURL: evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || evidencia.thumbnailDownloadURL || "",
-    thumbnailDownloadURL: evidencia.thumbnailDownloadURL || evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || "",
+    thumbnailURL: evidencia.thumbnailURL || evidencia.miniaturaDownloadURL || "",
     downloadURL: evidencia.downloadURL || downloadURL || "",
     url: evidencia.url || downloadURL || "",
-    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath),
+    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath || miniaturaDownloadURL),
   };
 }
 
@@ -758,59 +759,10 @@ function lerFilaSyncLocal() {
   );
 }
 
-function criarResumoLeveFilaSync(inspecao = {}) {
-  return {
-    id: inspecao.id,
-    usuarioId: inspecao.usuarioId || "",
-    inspetorNome: inspecao.inspetorNome || "",
-    aeroporto: inspecao.aeroporto || criarSnapshotAeroporto(inspecao.configAerodromo || {}),
-    configAerodromo: inspecao.configAerodromo || {},
-    respostasPorNorma: criarRespostasLevesParaArmazenamentoLocal(reconstruirRespostasPorNorma(inspecao)),
-    criadoEm: inspecao.criadoEm || "",
-    atualizadoEm: inspecao.atualizadoEm || new Date().toISOString(),
-    statusGeral: inspecao.statusGeral || "em_andamento",
-    percentualConcluido: Number(inspecao.percentualConcluido || 0),
-    totalItens: Number(inspecao.totalItens || 0),
-    totalNaoConformidades: Number(inspecao.totalNaoConformidades || 0),
-    pendenteSync: true,
-    sincronizadoOnline: false,
-    ultimoErroSync: inspecao.ultimoErroSync || "",
-  };
-}
-
 function gravarFilaSyncLocal(lista = []) {
-  const validas = filtrarInspecoesValidas(lista).map(criarResumoLeveFilaSync);
-  try {
-    localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
-    return validas;
-  } catch (erro) {
-    console.warn("Fila offline excedeu a quota local. Gravando fila mínima sem respostas para proteger o app.", erro);
-    const minima = validas.map((insp) => ({
-      id: insp.id,
-      usuarioId: insp.usuarioId || "",
-      inspetorNome: insp.inspetorNome || "",
-      aeroporto: insp.aeroporto || {},
-      configAerodromo: insp.configAerodromo || {},
-      criadoEm: insp.criadoEm || "",
-      atualizadoEm: insp.atualizadoEm || new Date().toISOString(),
-      statusGeral: insp.statusGeral || "em_andamento",
-      percentualConcluido: Number(insp.percentualConcluido || 0),
-      totalItens: Number(insp.totalItens || 0),
-      totalNaoConformidades: Number(insp.totalNaoConformidades || 0),
-      pendenteSync: true,
-      sincronizadoOnline: false,
-      ultimoErroSync: insp.ultimoErroSync || "Fila local reduzida por limite de espaço do navegador.",
-      respostasPorNorma: criarRespostasNormas(),
-    }));
-    try {
-      localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(minima));
-      return minima;
-    } catch (erroMinimo) {
-      console.error("Não foi possível gravar nem a fila mínima offline.", erroMinimo);
-      localStorage.removeItem(STORAGE_KEYS.inspecoesPendentesSync);
-      return [];
-    }
-  }
+  const validas = filtrarInspecoesValidas(lista);
+  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas.map(criarInspecaoLeveParaStorage)));
+  return validas;
 }
 
 function adicionarInspecaoNaFilaSync(inspecao) {
@@ -854,9 +806,12 @@ function temFonteImagem(ev = {}) {
     ev.data ||
     ev.previewLocal ||
     ev.base64 ||
+    ev.miniaturaDownloadURL ||
+    ev.thumbnailURL ||
     ev.downloadURL ||
     ev.url ||
-    ev.storagePath
+    ev.storagePath ||
+    ev.miniaturaStoragePath
   );
 }
 
@@ -886,6 +841,10 @@ function mesclarEvidenciasPreservandoImagem(novas = [], antigas = []) {
       base64: ev.base64 || anterior.base64 || "",
       miniaturaBase64: ev.miniaturaBase64 || ev.thumbnailBase64 || anterior.miniaturaBase64 || anterior.thumbnailBase64 || "",
       thumbnailBase64: ev.thumbnailBase64 || ev.miniaturaBase64 || anterior.thumbnailBase64 || anterior.miniaturaBase64 || "",
+      miniaturaStoragePath: ev.miniaturaStoragePath || ev.thumbnailStoragePath || anterior.miniaturaStoragePath || anterior.thumbnailStoragePath || "",
+      miniaturaDownloadURL: ev.miniaturaDownloadURL || ev.thumbnailURL || anterior.miniaturaDownloadURL || anterior.thumbnailURL || "",
+      thumbnailStoragePath: ev.thumbnailStoragePath || ev.miniaturaStoragePath || anterior.thumbnailStoragePath || anterior.miniaturaStoragePath || "",
+      thumbnailURL: ev.thumbnailURL || ev.miniaturaDownloadURL || anterior.thumbnailURL || anterior.miniaturaDownloadURL || "",
       downloadURL: ev.downloadURL || anterior.downloadURL || anterior.url || "",
       url: ev.url || ev.downloadURL || anterior.url || anterior.downloadURL || "",
       storagePath: ev.storagePath || anterior.storagePath || "",
@@ -1345,8 +1304,6 @@ async function prepararImagemParaRelatorio(imagem) {
     const candidatos = [
       imagem.miniaturaDownloadURL,
       imagem.thumbnailURL,
-      imagem.thumbnailDownloadURL,
-      imagem.urlMiniatura,
       imagem.downloadURL,
       imagem.url,
       imagem.data,
@@ -1354,10 +1311,19 @@ async function prepararImagemParaRelatorio(imagem) {
       imagem.base64,
     ].filter(Boolean);
 
+    if (imagem.miniaturaStoragePath || imagem.thumbnailStoragePath) {
+      try {
+        const urlMiniatura = await obterDownloadURLPorStoragePath(imagem.miniaturaStoragePath || imagem.thumbnailStoragePath);
+        if (urlMiniatura) candidatos.unshift(urlMiniatura);
+      } catch (erroStorageMiniatura) {
+        console.warn("Não foi possível recuperar miniatura pelo storagePath:", erroStorageMiniatura);
+      }
+    }
+
     if (imagem.storagePath) {
       try {
         const urlStorage = await obterDownloadURLPorStoragePath(imagem.storagePath);
-        if (urlStorage) candidatos.unshift(urlStorage);
+        if (urlStorage) candidatos.push(urlStorage);
       } catch (erroStorage) {
         console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erroStorage);
       }
@@ -1426,7 +1392,7 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
     String(valor || "").startsWith("data:image")
   ) || "";
 
-  const urlOnline = [imagem?.miniaturaDownloadURL, imagem?.thumbnailURL, imagem?.thumbnailDownloadURL, imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+  const urlOnline = [imagem?.miniaturaDownloadURL, imagem?.thumbnailURL, imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
     String(valor || "").startsWith("http")
   ) || "";
 
@@ -1446,14 +1412,13 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
     base64: base64 || imagem?.base64 || "",
     miniaturaBase64: miniaturaBase64 || imagem?.miniaturaBase64 || imagem?.thumbnailBase64 || "",
     thumbnailBase64: imagem?.thumbnailBase64 || miniaturaBase64 || imagem?.miniaturaBase64 || "",
-    downloadURL: imagem?.downloadURL || urlOnline || "",
+    miniaturaStoragePath: imagem?.miniaturaStoragePath || imagem?.thumbnailStoragePath || "",
+    miniaturaDownloadURL: imagem?.miniaturaDownloadURL || imagem?.thumbnailURL || "",
+    thumbnailStoragePath: imagem?.thumbnailStoragePath || imagem?.miniaturaStoragePath || "",
+    thumbnailURL: imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || "",
+    downloadURL: imagem?.downloadURL || "",
     url: imagem?.url || imagem?.downloadURL || urlOnline || "",
     storagePath: imagem?.storagePath || "",
-    miniaturaStoragePath: imagem?.miniaturaStoragePath || imagem?.thumbnailStoragePath || "",
-    thumbnailStoragePath: imagem?.thumbnailStoragePath || imagem?.miniaturaStoragePath || "",
-    miniaturaDownloadURL: imagem?.miniaturaDownloadURL || imagem?.thumbnailURL || imagem?.thumbnailDownloadURL || "",
-    thumbnailURL: imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || imagem?.thumbnailDownloadURL || "",
-    thumbnailDownloadURL: imagem?.thumbnailDownloadURL || imagem?.thumbnailURL || imagem?.miniaturaDownloadURL || "",
     imagemSalvaOnline: Boolean(imagem?.imagemSalvaOnline || urlOnline || imagem?.storagePath),
     geolocalizacao,
     latitude,
@@ -1520,7 +1485,13 @@ function sanitizarValorFirebase(valor) {
   if (valor === undefined) return null;
   if (valor === null) return null;
 
-  if (typeof valor === "string" || typeof valor === "number" || typeof valor === "boolean") {
+  if (typeof valor === "string") {
+    // Blindagem Firestore: nenhum dataURL/base64 deve ser salvo em documento.
+    if (valor.startsWith("data:image")) return "";
+    return valor;
+  }
+
+  if (typeof valor === "number" || typeof valor === "boolean") {
     return valor;
   }
 
@@ -1568,13 +1539,12 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
           tamanho: ev?.tamanho || ev?.size || null,
-          // Storage Only: não enviar base64/miniaturaBase64 para Firestore.
-          // Miniaturas devem ficar no Firebase Storage e o Firestore guarda só URL/path.
+          // Firestore deve ficar leve: NUNCA salvar base64/miniaturaBase64 aqui.
+          // Miniatura para PDF fica no Firebase Storage, referenciada por URL/path.
           miniaturaStoragePath: ev?.miniaturaStoragePath || ev?.thumbnailStoragePath || "",
+          miniaturaDownloadURL: ev?.miniaturaDownloadURL || ev?.thumbnailURL || "",
           thumbnailStoragePath: ev?.thumbnailStoragePath || ev?.miniaturaStoragePath || "",
-          miniaturaDownloadURL: ev?.miniaturaDownloadURL || ev?.thumbnailURL || ev?.thumbnailDownloadURL || "",
-          thumbnailURL: ev?.thumbnailURL || ev?.miniaturaDownloadURL || ev?.thumbnailDownloadURL || "",
-          thumbnailDownloadURL: ev?.thumbnailDownloadURL || ev?.thumbnailURL || ev?.miniaturaDownloadURL || "",
+          thumbnailURL: ev?.thumbnailURL || ev?.miniaturaDownloadURL || "",
           criadoEm: ev?.criadoEm || "",
           capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
           enviadoEm: ev?.enviadoEm || "",
@@ -3055,17 +3025,17 @@ export default function App() {
         nome: arquivo.name || `foto-${Date.now()}.jpg`,
         tipo: arquivo.type || "image/jpeg",
         tamanho: arquivo.size || null,
-        data: previewBase64,
-        previewLocal: previewBase64,
-        base64: previewBase64,
-        miniaturaBase64: miniaturaBase64 || previewBase64,
-        thumbnailBase64: miniaturaBase64 || previewBase64,
-        storagePath: uploadResultado?.storagePath || "",
+        data: "",
+        previewLocal: "",
+        base64: "",
+        // Mantida apenas no estado atual/IndexedDB para preview imediato; não vai ao Firestore.
+        miniaturaBase64: miniaturaBase64 || "",
+        thumbnailBase64: miniaturaBase64 || "",
         miniaturaStoragePath: uploadResultado?.miniaturaStoragePath || uploadResultado?.thumbnailStoragePath || "",
+        miniaturaDownloadURL: uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailURL || "",
         thumbnailStoragePath: uploadResultado?.thumbnailStoragePath || uploadResultado?.miniaturaStoragePath || "",
-        miniaturaDownloadURL: uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.thumbnailDownloadURL || "",
-        thumbnailURL: uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || uploadResultado?.thumbnailDownloadURL || "",
-        thumbnailDownloadURL: uploadResultado?.thumbnailDownloadURL || uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || "",
+        thumbnailURL: uploadResultado?.thumbnailURL || uploadResultado?.miniaturaDownloadURL || "",
+        storagePath: uploadResultado?.storagePath || "",
         downloadURL: uploadResultado?.downloadURL || "",
         url: uploadResultado?.downloadURL || uploadResultado?.url || "",
         imagemSalvaOnline: Boolean(uploadResultado?.downloadURL || uploadResultado?.storagePath),
