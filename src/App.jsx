@@ -4261,45 +4261,8 @@ export default function App() {
           : "";
         const temFotoCard = String(primeiraFotoBase64 || "").startsWith("data:image");
         const itemSemClassificacao = String(item.id || "") === "4.7";
-        const sc = statusColor(status);
 
-        // Layout Premium VELOX — card dinâmico em duas colunas reais.
-        // Evita que foto sobreponha texto quando descrição, condição ou observação são longas.
-        const cardX = 14;
-        const cardW = 182;
-        const padding = 6;
-        const numeroW = 16;
-        const fotoW = temFotoCard ? 48 : 0;
-        const gapFoto = temFotoCard ? 6 : 0;
-        const textoX = cardX + padding + numeroW + 4;
-        const textoW = cardW - padding * 2 - numeroW - 4 - fotoW - gapFoto - 6;
-        const fotoX = cardX + cardW - padding - fotoW;
-        const topoConteudo = y + 7;
-
-        doc.setFont(undefined, "bold");
-        doc.setFontSize(9.2);
-        const linhasTitulo = doc.splitTextToSize(item.titulo || item.item || "Item VCP", textoW);
-        doc.setFont(undefined, "normal");
-        doc.setFontSize(7.3);
-        const linhasDescricao = doc.splitTextToSize(item.descricao || "—", textoW);
-        doc.setFontSize(7.1);
-        const linhasCondicao = doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, textoW);
-        const linhasObs = doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, textoW);
-
-        const alturaTexto =
-          8 +
-          linhasTitulo.length * 4.2 +
-          2 +
-          linhasDescricao.length * 3.7 +
-          3 +
-          linhasCondicao.length * 3.6 +
-          3 +
-          linhasObs.length * 3.6 +
-          8;
-        const alturaFoto = temFotoCard ? 50 : 0;
-        const cardH = Math.max(58, alturaTexto, alturaFoto + 18);
-
-        if (y + cardH > 265) {
+        if (y > 232) {
           rodapeVCP("Cards VCP");
           doc.addPage();
           cabecalhoVCP("Cards VCP - Checklist Operacional");
@@ -4308,72 +4271,51 @@ export default function App() {
 
         doc.setDrawColor(...CORES.borda);
         doc.setFillColor(255, 255, 255);
-        doc.roundedRect(cardX, y - 5, cardW, cardH, 3, 3, "FD");
-
-        // Faixa discreta de identificação do item
+        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+        const sc = statusColor(status);
         doc.setFillColor(sc[0], sc[1], sc[2]);
-        doc.roundedRect(cardX + padding - 1, y + 2, numeroW, 12, 2, 2, "F");
-        doc.setFontSize(8.2);
+        doc.roundedRect(18, y, 14, 12, 2, 2, "F");
+        doc.setFontSize(8.5);
         doc.setTextColor(255, 255, 255);
         doc.setFont(undefined, "bold");
-        doc.text(String(chave), cardX + padding - 1 + numeroW / 2, y + 10, { align: "center" });
+        doc.text(String(chave), 25, y + 8, { align: "center" });
 
-        // Coluna de texto
-        let textoY = y + 5;
         doc.setTextColor(...CORES.texto);
         doc.setFontSize(9.2);
-        doc.setFont(undefined, "bold");
-        doc.text(linhasTitulo, textoX, textoY);
-        textoY += linhasTitulo.length * 4.2 + 3;
-
+        doc.text(item.titulo || item.item || "Item VCP", 38, y + 4);
         doc.setFont(undefined, "normal");
         doc.setFontSize(7.3);
         doc.setTextColor(...CORES.cinza);
-        doc.text(linhasDescricao, textoX, textoY);
-        textoY += linhasDescricao.length * 3.7 + 4;
-
+        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 78 : 98), 38, y + 12);
         doc.setFontSize(7.1);
-        doc.text(linhasCondicao, textoX, textoY);
-        textoY += linhasCondicao.length * 3.6 + 4;
-        doc.text(linhasObs, textoX, textoY);
+        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 78 : 98), 38, y + 32);
+        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 78 : 98), 38, y + 42);
 
-        // Coluna direita: status/classificação/foto, sem invadir texto
-        const colunaX = temFotoCard ? fotoX : 145;
-        const colunaW = temFotoCard ? fotoW : 38;
         doc.setFillColor(sc[0], sc[1], sc[2]);
-        doc.roundedRect(colunaX, y + 2, colunaW, 9, 2, 2, "F");
+        doc.roundedRect(142, y, 38, 9, 2, 2, "F");
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(6.4);
-        doc.setFont(undefined, "bold");
-        doc.text(status, colunaX + colunaW / 2, y + 8, { align: "center" });
-        doc.setFont(undefined, "normal");
-
-        doc.setTextColor(...CORES.cinza);
         doc.setFontSize(6.8);
-        doc.text("Classificação", colunaX + colunaW / 2, y + 16, { align: "center" });
-        doc.setFontSize(11.5);
+        doc.setFont(undefined, "bold");
+        doc.text(status, 161, y + 6, { align: "center" });
+        doc.setFont(undefined, "normal");
+        doc.setTextColor(...CORES.cinza);
+        doc.setFontSize(7.2);
+        doc.text("Classificação:", 151, y + 22, { align: "center" });
+        doc.setFontSize(13);
         doc.setTextColor(sc[0], sc[1], sc[2]);
         doc.setFont(undefined, "bold");
-        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", colunaX + colunaW / 2, y + 25, { align: "center" });
+        doc.text(itemSemClassificacao ? "—" : resposta.classificacaoVCP ? `${resposta.classificacaoVCP}/5` : "—", 161, y + 34, { align: "center" });
         doc.setFont(undefined, "normal");
 
         if (temFotoCard) {
           try {
             const formato = extensaoImagem(primeiraFotoBase64) === "png" ? "PNG" : "JPEG";
-            const imgW = 44;
-            const imgH = 34;
-            const imgX = fotoX + (fotoW - imgW) / 2;
-            const imgY = y + 30;
-            doc.setDrawColor(226, 232, 240);
-            doc.setFillColor(248, 250, 252);
-            doc.roundedRect(imgX - 1.5, imgY - 1.5, imgW + 3, imgH + 3, 2, 2, "FD");
-            doc.addImage(primeiraFotoBase64, formato, imgX, imgY, imgW, imgH);
+            doc.addImage(primeiraFotoBase64, formato, 108, y + 15, 30, 30);
           } catch (erro) {
             console.error("Erro ao inserir foto VCP no PDF:", erro);
           }
         }
-
-        y += cardH + 8;
+        y += 64;
       }
       rodapeVCP("Cards VCP");
 
