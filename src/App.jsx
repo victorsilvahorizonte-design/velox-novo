@@ -4173,6 +4173,22 @@ export default function App() {
         return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}${p}`;
       }
 
+      function adicionarImagemAjustada(docPdf, imagemBase64, x, yImg, maxW, maxH) {
+        if (!String(imagemBase64 || "").startsWith("data:image")) return false;
+        try {
+          const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
+          const props = docPdf.getImageProperties(imagemBase64);
+          const proporcao = Math.min(maxW / props.width, maxH / props.height);
+          const w = Math.max(1, props.width * proporcao);
+          const h = Math.max(1, props.height * proporcao);
+          docPdf.addImage(imagemBase64, formato, x + (maxW - w) / 2, yImg + (maxH - h) / 2, w, h);
+          return true;
+        } catch (erro) {
+          console.error("Erro ao ajustar imagem no PDF:", erro);
+          return false;
+        }
+      }
+
       // CAPA PREMIUM
       setRGB(CORES.grafite);
       doc.rect(0, 0, largura, altura, "F");
@@ -4308,10 +4324,10 @@ export default function App() {
         doc.setFont(undefined, "normal");
         doc.setFontSize(7.3);
         doc.setTextColor(...CORES.cinza);
-        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 78 : 98), 38, y + 12);
+        doc.text(doc.splitTextToSize(item.descricao || "—", temFotoCard ? 64 : 98), 38, y + 12);
         doc.setFontSize(7.1);
-        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 78 : 98), 38, y + 32);
-        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 78 : 98), 38, y + 42);
+        doc.text(doc.splitTextToSize(`Condição: ${resposta.condicaoAtual || "—"}`, temFotoCard ? 64 : 98), 38, y + 32);
+        doc.text(doc.splitTextToSize(`Obs.: ${resposta.obs || "—"}`, temFotoCard ? 64 : 98), 38, y + 42);
 
         doc.setFillColor(sc[0], sc[1], sc[2]);
         doc.roundedRect(142, y, 38, 9, 2, 2, "F");
@@ -4331,8 +4347,7 @@ export default function App() {
 
         if (temFotoCard) {
           try {
-            const formato = extensaoImagem(primeiraFotoBase64) === "png" ? "PNG" : "JPEG";
-            doc.addImage(primeiraFotoBase64, formato, 108, y + 15, 30, 30);
+            adicionarImagemAjustada(doc, primeiraFotoBase64, 109, y + 15, 32, 32);
           } catch (erro) {
             console.error("Erro ao inserir foto VCP no PDF:", erro);
           }
@@ -4369,7 +4384,8 @@ export default function App() {
         doc.text("Fotos vinculadas aos cards", 14, 40);
         y = 54;
         for (const ev of evidencias) {
-          if (y > 222) {
+          const blocoAltura = 78;
+          if (y + blocoAltura > 262) {
             rodapeVCP("Fotos vinculadas");
             doc.addPage();
             cabecalhoVCP("Fotos vinculadas aos cards");
@@ -4377,39 +4393,37 @@ export default function App() {
           }
           doc.setDrawColor(...CORES.borda);
           doc.setFillColor(...CORES.fundo);
-          doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
-          doc.setFontSize(8.2);
+          doc.roundedRect(14, y - 5, 182, blocoAltura, 3, 3, "FD");
+          doc.setFontSize(8.8);
           doc.setTextColor(17, 83, 37);
           doc.setFont(undefined, "bold");
           doc.text(`${ev.id} • Item ${ev.itemId}`, 18, y + 2);
           doc.setFont(undefined, "normal");
-          doc.setFontSize(7.4);
+          doc.setFontSize(7.6);
           doc.setTextColor(...CORES.cinza);
-          doc.text(doc.splitTextToSize(ev.itemTitulo, 90), 18, y + 11);
-          doc.text(doc.splitTextToSize(`Condição: ${ev.condicaoAtual || "—"}`, 90), 18, y + 24);
-          doc.text(dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm), 18, y + 36);
-          doc.text(textoGeo(ev), 18, y + 43);
-          doc.text(`Responsável: ${ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—"}`, 18, y + 50);
+          doc.text(`Condição: ${ev.condicaoAtual || "—"}`, 18, y + 13);
+          doc.text(`Data: ${dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm)}`, 18, y + 23);
+          doc.text(doc.splitTextToSize(`GPS: ${textoGeo(ev)}`, 70), 18, y + 33);
+          doc.text(doc.splitTextToSize(`Responsável: ${ev.responsavel || ev.imagem?.responsavel || usuarioLogado?.nomeCompleto || "—"}`, 70), 18, y + 45);
           if (ev.linkMaps || ev.imagem?.linkMaps) {
             doc.setTextColor(22, 148, 70);
-            doc.textWithLink("Ver no mapa", 93, y + 50, { url: ev.linkMaps || ev.imagem?.linkMaps });
+            doc.textWithLink("Ver no mapa", 18, y + 60, { url: ev.linkMaps || ev.imagem?.linkMaps });
           }
           try {
             const imagemBase64 =
               (await prepararImagemParaRelatorio(ev.imagem)) ||
               (await prepararImagemParaRelatorio(ev));
             if (imagemBase64) {
-              const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
-              doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+              adicionarImagemAjustada(doc, imagemBase64, 94, y - 1, 92, 66);
             } else {
               doc.setFontSize(8);
               doc.setTextColor(239, 68, 68);
-              doc.text("Imagem não disponível.", 122, y + 15);
+              doc.text("Imagem não disponível.", 108, y + 28);
             }
           } catch (erro) {
             console.error("Erro ao inserir imagem VCP no PDF:", erro);
           }
-          y += 65;
+          y += blocoAltura + 7;
         }
         rodapeVCP("Fotos vinculadas");
       }
@@ -4668,6 +4682,22 @@ export default function App() {
         doc.text(titulo, largura - 10, 14, { align: "right" });
       }
 
+      function adicionarImagemAjustada(docPdf, imagemBase64, x, yImg, maxW, maxH) {
+        if (!String(imagemBase64 || "").startsWith("data:image")) return false;
+        try {
+          const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
+          const props = docPdf.getImageProperties(imagemBase64);
+          const proporcao = Math.min(maxW / props.width, maxH / props.height);
+          const w = Math.max(1, props.width * proporcao);
+          const h = Math.max(1, props.height * proporcao);
+          docPdf.addImage(imagemBase64, formato, x + (maxW - w) / 2, yImg + (maxH - h) / 2, w, h);
+          return true;
+        } catch (erro) {
+          console.error("Erro ao ajustar imagem no PDF:", erro);
+          return false;
+        }
+      }
+
       doc.setFillColor(6, 19, 11);
       doc.rect(0, 0, largura, altura, "F");
       doc.setFillColor(32, 196, 90);
@@ -4800,22 +4830,21 @@ export default function App() {
             doc.text(`${String(chave)} • ${item.titulo || "Item VCP"}`, 54, y + 3);
             doc.setFontSize(7.8);
             doc.setTextColor(45, 55, 65);
-            doc.text(doc.splitTextToSize(item.descricao || textoItem, primeiraFoto ? 94 : 160), 16, y + 12);
+            doc.text(doc.splitTextToSize(item.descricao || textoItem, primeiraFoto ? 92 : 160), 16, y + 12);
             doc.setFontSize(7.2);
             doc.setTextColor(80, 90, 100);
             if (String(item.id || "") !== "4.7") {
-              doc.text(doc.splitTextToSize(`Classificação: ${resposta.classificacaoVCP || "-"}/5`, 92), 16, y + 28);
-              doc.text(doc.splitTextToSize(`Condição atual: ${condicaoAtual}`, primeiraFoto ? 92 : 160), 16, y + 36);
-              doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 92 : 160), 16, y + 48);
+              doc.text(doc.splitTextToSize(`Classificação: ${resposta.classificacaoVCP || "-"}/5`, 90), 16, y + 28);
+              doc.text(doc.splitTextToSize(`Condição atual: ${condicaoAtual}`, primeiraFoto ? 90 : 160), 16, y + 36);
+              doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 90 : 160), 16, y + 48);
             } else {
-              doc.text(doc.splitTextToSize(`Condição atual: ${condicaoAtual}`, primeiraFoto ? 92 : 160), 16, y + 30);
-              doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 92 : 160), 16, y + 44);
+              doc.text(doc.splitTextToSize(`Condição atual: ${condicaoAtual}`, primeiraFoto ? 90 : 160), 16, y + 30);
+              doc.text(doc.splitTextToSize(`Obs.: ${obs}`, primeiraFoto ? 90 : 160), 16, y + 44);
             }
 
             if (primeiraFoto?.data && String(primeiraFoto.data).startsWith("data:image")) {
               try {
-                const formato = extensaoImagem(primeiraFoto.data) === "png" ? "PNG" : "JPEG";
-                doc.addImage(primeiraFoto.data, formato, 124, y + 7, 58, 40);
+                adicionarImagemAjustada(doc, primeiraFoto.data, 126, y + 7, 56, 40);
               } catch (erro) {
                 console.error("Erro ao inserir imagem do item VCP no PDF:", erro);
               }
@@ -4872,7 +4901,8 @@ export default function App() {
       }
 
       for (const ev of evidencias) {
-        if (y > 220) {
+        const blocoAltura = 78;
+        if (y + blocoAltura > 262) {
           doc.addPage();
           cabecalho("Evidências Fotográficas");
           y = 38;
@@ -4880,35 +4910,32 @@ export default function App() {
 
         doc.setDrawColor(210, 215, 220);
         doc.setFillColor(248, 250, 252);
-        doc.roundedRect(14, y - 5, 182, 58, 3, 3, "FD");
+        doc.roundedRect(14, y - 5, 182, blocoAltura, 3, 3, "FD");
         doc.setFontSize(9);
         doc.setTextColor(10, 31, 18);
         doc.text(`${ev.id} • ${ev.normaNome} • Item ${ev.itemId}`, 18, y + 2);
-        doc.setFontSize(8);
-        doc.setTextColor(45, 55, 65);
-        doc.text(doc.splitTextToSize(ev.itemTitulo, 95), 18, y + 10);
-        doc.setFontSize(7.5);
+        doc.setFontSize(7.8);
         doc.setTextColor(80, 90, 100);
-        doc.text(doc.splitTextToSize(`Status: ${ev.status}`, 95), 18, y + 30);
-        doc.text(doc.splitTextToSize(`Observação: ${ev.observacao || "-"}`, 95), 18, y + 38);
+        doc.text(`Status: ${ev.status}`, 18, y + 14);
+        doc.text(`Data: ${dataBR(ev.capturadoEm || ev.imagem?.capturadoEm || ev.imagem?.criadoEm)}`, 18, y + 24);
+        doc.text(doc.splitTextToSize(`Observação: ${ev.observacao || "-"}`, 70), 18, y + 34);
 
         try {
           const imagemBase64 = await prepararImagemParaRelatorio(ev.imagem);
           if (imagemBase64) {
-            const formato = extensaoImagem(imagemBase64) === "png" ? "PNG" : "JPEG";
-            doc.addImage(imagemBase64, formato, 122, y - 1, 62, 46);
+            adicionarImagemAjustada(doc, imagemBase64, 94, y - 1, 92, 66);
           } else {
             doc.setFontSize(8);
             doc.setTextColor(239, 68, 68);
-            doc.text("Imagem não disponível.", 122, y + 15);
+            doc.text("Imagem não disponível.", 108, y + 28);
           }
         } catch (erro) {
           console.error("Erro ao inserir imagem no PDF:", erro);
           doc.setFontSize(8);
           doc.setTextColor(239, 68, 68);
-          doc.text("Imagem não pôde ser renderizada.", 122, y + 15);
+          doc.text("Imagem não pôde ser renderizada.", 108, y + 28);
         }
-        y += 65;
+        y += blocoAltura + 7;
       }
 
       rodape("Evidências");
