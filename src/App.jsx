@@ -662,23 +662,22 @@ function removerConteudoPesadoImagem(evidencia = {}) {
   const downloadURL = evidencia.downloadURL || evidencia.url || "";
   const temUrlOnline = Boolean(downloadURL || evidencia.storagePath);
 
-  // Correção Bug 3:
-  // Só removemos o base64 do localStorage quando existe imagem online recuperável
-  // (downloadURL/storagePath). Se o upload falhar, manter o dataURL local evita
-  // perder a foto ao fechar e reabrir o app.
-  const dataOriginal = evidencia.data || evidencia.previewLocal || evidencia.base64 || "";
-  const deveRemoverBase64 = temUrlOnline && String(dataOriginal).startsWith("data:image");
-
+  // VELOX V3 — correção definitiva de quota:
+  // localStorage e fila offline NÃO podem guardar base64/DataURL/miniaturas pesadas.
+  // As fotos ficam no Firebase Storage; localStorage guarda apenas metadados leves.
   return {
     ...evidencia,
-    data: deveRemoverBase64 ? "" : evidencia.data || "",
-    previewLocal: deveRemoverBase64 ? "" : evidencia.previewLocal || "",
-    base64: deveRemoverBase64 ? "" : evidencia.base64 || "",
-    miniaturaBase64: evidencia.miniaturaBase64 || evidencia.thumbnailBase64 || evidencia.thumbBase64 || "",
-    thumbnailBase64: evidencia.thumbnailBase64 || evidencia.miniaturaBase64 || "",
+    data: "",
+    previewLocal: "",
+    base64: "",
+    miniaturaBase64: "",
+    thumbnailBase64: "",
+    thumbBase64: "",
     downloadURL: evidencia.downloadURL || downloadURL || "",
     url: evidencia.url || downloadURL || "",
-    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || downloadURL || evidencia.storagePath),
+    storagePath: evidencia.storagePath || "",
+    imagemSalvaOnline: Boolean(evidencia.imagemSalvaOnline || temUrlOnline),
+    fotoSomenteOnline: Boolean(temUrlOnline),
   };
 }
 
@@ -755,10 +754,48 @@ function lerFilaSyncLocal() {
   );
 }
 
+function criarInspecaoMinimaParaFilaSync(inspecao = {}) {
+  return {
+    id: inspecao.id,
+    usuarioId: inspecao.usuarioId || "",
+    inspetorNome: inspecao.inspetorNome || "",
+    aeroporto: inspecao.aeroporto || criarSnapshotAeroporto(inspecao.configAerodromo || {}),
+    configAerodromo: inspecao.configAerodromo || {},
+    criadoEm: inspecao.criadoEm || "",
+    atualizadoEm: inspecao.atualizadoEm || "",
+    statusGeral: inspecao.statusGeral || "em_andamento",
+    percentualConcluido: Number(inspecao.percentualConcluido || 0),
+    totalItens: Number(inspecao.totalItens || 0),
+    totalNaoConformidades: Number(inspecao.totalNaoConformidades || 0),
+    pendenteSync: true,
+    sincronizadoOnline: false,
+    ultimoErroSync: inspecao.ultimoErroSync || "Fila offline reduzida por limite do navegador.",
+    respostasPorNorma: criarRespostasNormas(),
+  };
+}
+
 function gravarFilaSyncLocal(lista = []) {
-  const validas = filtrarInspecoesValidas(lista);
-  localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas.map(criarInspecaoLeveParaStorage)));
-  return validas;
+  const validas = filtrarInspecoesValidas(lista)
+    .map(criarInspecaoLeveParaStorage)
+    .slice(0, 20);
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(validas));
+    return validas;
+  } catch (erro) {
+    console.warn("Quota excedida ao gravar fila offline completa. Gravando fila mínima.", erro);
+    try {
+      const minimas = validas.map(criarInspecaoMinimaParaFilaSync);
+      localStorage.setItem(STORAGE_KEYS.inspecoesPendentesSync, JSON.stringify(minimas));
+      return minimas;
+    } catch (erroMinimo) {
+      console.error("Não foi possível gravar nem a fila mínima de sincronização.", erroMinimo);
+      try {
+        localStorage.removeItem(STORAGE_KEYS.inspecoesPendentesSync);
+      } catch {}
+      return [];
+    }
+  }
 }
 
 function adicionarInspecaoNaFilaSync(inspecao) {
@@ -1507,10 +1544,10 @@ function criarRespostasLevesParaFirebase(respostasOriginais = {}) {
           nome: ev?.nome || "",
           tipo: ev?.tipo || "",
           tamanho: ev?.tamanho || ev?.size || null,
-          // Miniatura leve para PDF: mantém relatório funcionando no PC/celular
-          // mesmo após limpar cache, sem depender de fetch/CORS do Storage.
-          miniaturaBase64: ev?.miniaturaBase64 || ev?.thumbnailBase64 || ev?.thumbBase64 || "",
-          thumbnailBase64: ev?.thumbnailBase64 || ev?.miniaturaBase64 || "",
+          // Não salvar miniaturas/base64 no Firestore em inspeções grandes.
+          // O relatório deve recuperar a imagem por downloadURL/storagePath.
+          miniaturaBase64: "",
+          thumbnailBase64: "",
           criadoEm: ev?.criadoEm || "",
           capturadoEm: ev?.capturadoEm || ev?.criadoEm || "",
           enviadoEm: ev?.enviadoEm || "",

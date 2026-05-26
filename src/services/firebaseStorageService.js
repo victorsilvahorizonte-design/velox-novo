@@ -35,8 +35,11 @@ export function montarCaminhoEvidenciaStorage({
   itemId,
   arquivo,
 }) {
+  // PADRÃO OFICIAL VELOX V3:
+  // usar sempre e-mail sanitizado como pasta do usuário.
+  // Não usar uid como fallback, para evitar pastas aleatórias no Firebase Storage.
   const usuarioSeguro = limparParteCaminho(
-    usuario?.email || usuario?.id || usuario?.uid || "usuario"
+    usuario?.email || usuario?.emailUsuario || usuario?.login || "usuario-sem-email"
   );
 
   const inspecaoSegura = limparParteCaminho(inspecaoId || "temporaria");
@@ -129,9 +132,14 @@ export async function enviarEvidenciaParaStorage({
     storagePath,
     downloadURL,
     url: downloadURL,
-    data: previewLocal || "",
-    previewLocal: previewLocal || "",
-    base64: previewLocal || "",
+
+    // IMPORTANTE VELOX V3:
+    // Não retornar base64 pesado após upload.
+    // A imagem real fica no Firebase Storage; o app salva apenas storagePath/downloadURL.
+    // Isso evita estouro de quota no localStorage/Edge/Chrome com inspeções grandes.
+    data: "",
+    previewLocal: "",
+    base64: "",
     miniaturaBase64: miniatura,
     thumbnailBase64: miniatura,
     imagemSalvaOnline: true,
@@ -165,14 +173,14 @@ export async function excluirEvidenciaDoStorage(storagePath) {
 
 export function obterUrlImagemEvidencia(evidencia) {
   return (
+    evidencia?.downloadURL ||
+    evidencia?.url ||
     evidencia?.miniaturaBase64 ||
     evidencia?.thumbnailBase64 ||
     evidencia?.thumbBase64 ||
     evidencia?.data ||
     evidencia?.previewLocal ||
     evidencia?.base64 ||
-    evidencia?.downloadURL ||
-    evidencia?.url ||
     ""
   );
 }
