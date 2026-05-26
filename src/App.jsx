@@ -1305,8 +1305,59 @@ async function prepararImagemParaRelatorio(imagem) {
   try {
     if (!imagem) return "";
 
-    // Prioridade absoluta: miniatura leve salva junto da inspeção.
-    // Ela viaja pelo Firestore e não depende de cache do Chrome, fetch, canvas externo ou CORS.
+    const candidatosOnline = [];
+
+    if (imagem.downloadURL) candidatosOnline.push(imagem.downloadURL);
+    if (imagem.url && imagem.url !== imagem.downloadURL) candidatosOnline.push(imagem.url);
+
+    if (imagem.storagePath) {
+      try {
+        const urlStorage = await obterDownloadURLPorStoragePath(imagem.storagePath);
+        if (urlStorage) candidatosOnline.unshift(urlStorage);
+      } catch (erroStorage) {
+        console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erroStorage);
+      }
+    }
+
+    // VELOX V3 — PDF universal:
+    // Em outro navegador/celular não existe cache local. Por isso o relatório deve
+    // primeiro buscar a imagem online no Firebase Storage e converter temporariamente
+    // para base64 apenas durante a geração do PDF/XLS. Cache/base64 local fica só
+    // como fallback, preservando a correção de quota/localStorage.
+    const candidatosOnlineUnicos = [
+      ...new Set(
+        candidatosOnline
+          .map((valor) => String(valor || "").trim())
+          .filter((valor) => valor.startsWith("http"))
+      ),
+    ];
+
+    for (const fonte of candidatosOnlineUnicos) {
+      try {
+        const base64Fetch = await urlParaBase64(fonte);
+        if (String(base64Fetch || "").startsWith("data:image")) {
+          const miniaturaGerada = await gerarMiniaturaBase64Velox(base64Fetch, 1200, 0.82);
+          const base64Final = miniaturaGerada || base64Fetch;
+          await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Final, url: fonte, downloadURL: fonte });
+          return base64Final;
+        }
+      } catch (erroFetch) {
+        console.warn("Fetch da imagem online falhou; tentando canvas:", erroFetch);
+      }
+
+      try {
+        const base64Canvas = await imagemViaCanvasParaBase64(fonte);
+        if (String(base64Canvas || "").startsWith("data:image")) {
+          const miniaturaGerada = await gerarMiniaturaBase64Velox(base64Canvas, 1200, 0.82);
+          const base64Final = miniaturaGerada || base64Canvas;
+          await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Final, url: fonte, downloadURL: fonte });
+          return base64Final;
+        }
+      } catch (erroCanvas) {
+        console.warn("Canvas da imagem online falhou:", erroCanvas);
+      }
+    }
+
     const miniaturaDireta = [imagem.miniaturaBase64, imagem.thumbnailBase64, imagem.thumbBase64].find((valor) =>
       String(valor || "").startsWith("data:image")
     );
@@ -1319,75 +1370,28 @@ async function prepararImagemParaRelatorio(imagem) {
       String(valor || "").startsWith("data:image")
     );
     if (base64Direto) {
-      const miniaturaGerada = await gerarMiniaturaBase64Velox(base64Direto);
-      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: miniaturaGerada || base64Direto });
-      return miniaturaGerada || base64Direto;
+      const miniaturaGerada = await gerarMiniaturaBase64Velox(base64Direto, 1200, 0.82);
+      const base64Final = miniaturaGerada || base64Direto;
+      await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Final });
+      return base64Final;
     }
 
     const base64Cache = await obterEvidenciaDoCacheLocalVelox(imagem);
     if (base64Cache) return base64Cache;
 
-    const candidatos = [
-      imagem.downloadURL,
-      imagem.url,
-      imagem.data,
-      imagem.previewLocal,
-      imagem.base64,
-    ].filter(Boolean);
+    const candidatosBlob = [imagem.data, imagem.previewLocal, imagem.base64]
+      .map((valor) => String(valor || "").trim())
+      .filter((valor) => valor.startsWith("blob:"));
 
-    if (imagem.storagePath) {
+    for (const fonte of candidatosBlob) {
       try {
-        const urlStorage = await obterDownloadURLPorStoragePath(imagem.storagePath);
-        if (urlStorage) candidatos.unshift(urlStorage);
-      } catch (erroStorage) {
-        console.warn("Não foi possível recuperar downloadURL pelo storagePath:", erroStorage);
-      }
-    }
-
-    const candidatosUnicos = [...new Set(candidatos.map((valor) => String(valor || "").trim()).filter(Boolean))];
-
-    for (const fonte of candidatosUnicos) {
-      try {
-        if (fonte.startsWith("data:image")) {
-          await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: fonte });
-          return fonte;
+        const base64CanvasBlob = await imagemViaCanvasParaBase64(fonte);
+        if (String(base64CanvasBlob || "").startsWith("data:image")) {
+          await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64CanvasBlob });
+          return base64CanvasBlob;
         }
-
-        if (fonte.startsWith("http")) {
-          try {
-            const base64Fetch = await urlParaBase64(fonte);
-            if (String(base64Fetch || "").startsWith("data:image")) {
-              await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Fetch, url: fonte });
-              return base64Fetch;
-            }
-          } catch (erroFetch) {
-            console.warn("Fetch da imagem falhou; tentando canvas:", erroFetch);
-          }
-
-          try {
-            const base64Canvas = await imagemViaCanvasParaBase64(fonte);
-            if (String(base64Canvas || "").startsWith("data:image")) {
-              await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64Canvas, url: fonte });
-              return base64Canvas;
-            }
-          } catch (erroCanvas) {
-            console.warn("Canvas da imagem falhou:", erroCanvas);
-          }
-        }
-
-        if (fonte.startsWith("blob:")) {
-          try {
-            const base64CanvasBlob = await imagemViaCanvasParaBase64(fonte);
-            if (String(base64CanvasBlob || "").startsWith("data:image")) {
-              await salvarEvidenciaNoCacheLocalVelox({ ...imagem, data: base64CanvasBlob });
-              return base64CanvasBlob;
-            }
-          } catch (erroBlob) {
-            console.warn("Blob/canvas da imagem falhou:", erroBlob);
-          }
-        }
-      } catch (erroCandidato) {
-        console.warn("Falha ao preparar uma fonte de imagem para o relatório:", erroCandidato);
+      } catch (erroBlob) {
+        console.warn("Blob/canvas da imagem falhou:", erroBlob);
       }
     }
 
@@ -1399,16 +1403,16 @@ async function prepararImagemParaRelatorio(imagem) {
 }
 
 function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, itemId = "") {
+  const urlOnline = [imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+    String(valor || "").startsWith("http")
+  ) || "";
+
   const miniaturaBase64 = [imagem?.miniaturaBase64, imagem?.thumbnailBase64, imagem?.thumbBase64].find((valor) =>
     String(valor || "").startsWith("data:image")
   ) || "";
 
-  const base64 = [miniaturaBase64, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
+  const base64 = [imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
     String(valor || "").startsWith("data:image")
-  ) || "";
-
-  const urlOnline = [imagem?.downloadURL, imagem?.url, imagem?.data, imagem?.previewLocal, imagem?.base64].find((valor) =>
-    String(valor || "").startsWith("http")
   ) || "";
 
   const geolocalizacao = imagem?.geolocalizacao || null;
@@ -1422,11 +1426,13 @@ function normalizarImagemEvidenciaParaRelatorio(imagem = {}, resposta = {}, item
 
   return {
     ...imagem,
-    data: base64 || imagem?.data || "",
-    previewLocal: base64 || imagem?.previewLocal || "",
-    base64: base64 || imagem?.base64 || "",
-    miniaturaBase64: miniaturaBase64 || imagem?.miniaturaBase64 || imagem?.thumbnailBase64 || "",
-    thumbnailBase64: imagem?.thumbnailBase64 || miniaturaBase64 || imagem?.miniaturaBase64 || "",
+    // Para relatório em outro dispositivo, manter URL/Storage como fonte principal.
+    // Base64 local/cache é apenas fallback e não deve substituir o caminho online.
+    data: base64 || "",
+    previewLocal: base64 || "",
+    base64: base64 || "",
+    miniaturaBase64: miniaturaBase64 || "",
+    thumbnailBase64: imagem?.thumbnailBase64 || miniaturaBase64 || "",
     downloadURL: imagem?.downloadURL || urlOnline || "",
     url: imagem?.url || imagem?.downloadURL || urlOnline || "",
     storagePath: imagem?.storagePath || "",
@@ -3890,10 +3896,11 @@ export default function App() {
 
   function montarEvidenciasVCP(respostasBase = respostasPorNorma) {
     const lista = [];
+    const respostasFonte = respostasBase || respostasPorNorma || criarRespostasNormas();
 
     obterItensVCPParaRelatorio().forEach((item) => {
       const chave = item.id || item.ref;
-      const resposta = respostasPorNorma.VCP?.[chave] || {};
+      const resposta = respostasFonte.VCP?.[chave] || {};
       const imagens = Array.isArray(resposta.evidenciasAnexadas)
         ? resposta.evidenciasAnexadas
         : [];
