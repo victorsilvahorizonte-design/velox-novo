@@ -1890,6 +1890,7 @@ export default function App() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarMinhasInspecoes, setMostrarMinhasInspecoes] = useState(true);
   const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
+  const [transferenciaDestinoPorInspecao, setTransferenciaDestinoPorInspecao] = useState({});
   const [isMobileVCP, setIsMobileVCP] = useState(false);
   const [ultimoSalvamentoVisual, setUltimoSalvamentoVisual] = useState(() => {
     try {
@@ -2425,6 +2426,19 @@ export default function App() {
       .filter((insp) => insp.usuarioId === adminUsuarioSelecionado)
       .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
   }, [inspecoesAtivas, adminUsuarioSelecionado]);
+
+  const usuariosAtivosTransferencia = useMemo(() => {
+    return usuarios
+      .filter((usuario) => usuario?.id && usuario.ativo !== false && usuario.statusCadastro !== "bloqueado")
+      .sort((a, b) => String(a.nomeCompleto || a.email || "").localeCompare(String(b.nomeCompleto || b.email || "")));
+  }, [usuarios]);
+
+  function atualizarDestinoTransferencia(inspecaoId, usuarioDestinoId) {
+    setTransferenciaDestinoPorInspecao((prev) => ({
+      ...prev,
+      [inspecaoId]: usuarioDestinoId,
+    }));
+  }
 
   function atualizarResposta(item, campo, valor) {
     const chave = item.id || item.ref;
@@ -3678,6 +3692,120 @@ export default function App() {
       alert(`Cópia salva neste aparelho, mas ficou pendente de sincronização online: ${mensagemErroFirebase(erro)}`);
     });
     setMensagemBase("Inspeção duplicada com sucesso.");
+  }
+
+  async function transferirInspecaoParaUsuario(inspecaoId, usuarioDestinoIdParametro = "") {
+    if (!ehAdminMaster(usuarioLogado)) {
+      alert("Somente o Admin Master pode transferir inspeções entre usuários.");
+      return;
+    }
+
+    const alvo = inspecoes.find((insp) => insp.id === inspecaoId);
+    if (!alvo) {
+      alert("Inspeção não encontrada para transferência.");
+      return;
+    }
+
+    if (estaInspecaoNaLixeira(alvo)) {
+      alert("Restaure a inspeção antes de transferir para outro usuário.");
+      return;
+    }
+
+    const usuarioDestinoId = usuarioDestinoIdParametro || transferenciaDestinoPorInspecao[inspecaoId] || "";
+    const usuarioDestino = usuarios.find((usuario) => usuario.id === usuarioDestinoId);
+
+    if (!usuarioDestino) {
+      alert("Selecione um usuário de destino cadastrado e ativo.");
+      return;
+    }
+
+    if (usuarioDestino.id === alvo.usuarioId) {
+      alert("A inspeção já pertence a este usuário.");
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `Transferir inspeção para outro usuário?\n\n${descricaoInspecaoCurta(alvo)}\n\nDe: ${alvo.inspetorNome || alvo.usuarioId || "origem não informada"}\nPara: ${usuarioDestino.nomeCompleto || usuarioDestino.email}\n\nAs fotos NÃO serão duplicadas nem movidas no Firebase Storage.`
+    );
+
+    if (!confirmar) return;
+
+    const agora = new Date().toISOString();
+    const registroTransferencia = {
+      deUsuarioId: alvo.usuarioId || "",
+      deNome: alvo.inspetorNome || "",
+      paraUsuarioId: usuarioDestino.id,
+      paraNome: usuarioDestino.nomeCompleto || usuarioDestino.email || "",
+      porUsuarioId: usuarioLogado?.id || "",
+      porNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
+      transferidaEm: agora,
+    };
+
+    const atualizada = {
+      ...alvo,
+      usuarioId: usuarioDestino.id,
+      inspetorNome: usuarioDestino.nomeCompleto || usuarioDestino.email || "Usuário transferido",
+      transferidaPor: usuarioLogado?.id || "",
+      transferidaPorNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
+      transferidaEm: agora,
+      usuarioAnteriorId: alvo.usuarioId || "",
+      inspetorAnteriorNome: alvo.inspetorNome || "",
+      historicoTransferencias: [
+        ...(Array.isArray(alvo.historicoTransferencias) ? alvo.historicoTransferencias : []),
+        registroTransferencia,
+      ],
+      atualizadoEm: agora,
+      pendenteSync: true,
+      sincronizadoOnline: false,
+      ultimoErroSync: "",
+    };
+
+    setMensagemBase("Transferindo inspeção para o usuário selecionado...");
+
+    setInspecoes((prev) => {
+      const lista = prev.map((insp) => (insp.id === inspecaoId ? atualizada : insp));
+      gravarInspecoesLocalSeguro(lista);
+      return lista;
+    });
+
+    setTransferenciaDestinoPorInspecao((prev) => {
+      const proximo = { ...prev };
+      delete proximo[inspecaoId];
+      return proximo;
+    });
+
+    try {
+      await salvarInspecaoFirebase(prepararInspecaoParaFirebase(atualizada));
+
+      const sincronizada = {
+        ...atualizada,
+        pendenteSync: false,
+        sincronizadoOnline: true,
+        ultimoErroSync: "",
+      };
+
+      setInspecoes((prev) => {
+        const lista = prev.map((insp) => (insp.id === inspecaoId ? sincronizada : insp));
+        gravarInspecoesLocalSeguro(lista);
+        return lista;
+      });
+
+      removerInspecaoDaFilaSync(inspecaoId);
+
+      if (inspecaoAtualId === inspecaoId && usuarioDestino.id !== usuarioLogado?.id) {
+        setMensagemBase(`Inspeção transferida para ${usuarioDestino.nomeCompleto || usuarioDestino.email}.`);
+      } else {
+        setMensagemBase(`Inspeção transferida para ${usuarioDestino.nomeCompleto || usuarioDestino.email}.`);
+      }
+    } catch (erro) {
+      console.error("Falha ao transferir inspeção online:", erro);
+      adicionarInspecaoNaFilaSync({
+        ...atualizada,
+        ultimoErroSync: mensagemErroFirebase(erro),
+      });
+      setMensagemBase(`Transferência salva localmente, mas pendente de sincronização online: ${mensagemErroFirebase(erro)}`);
+      alert(`Transferência salva localmente, mas pendente de sincronização online: ${mensagemErroFirebase(erro)}`);
+    }
   }
 
   async function sincronizarInspecaoLixeira(inspecaoAtualizada, mensagemSucesso = "Inspeção atualizada.") {
@@ -5596,6 +5724,31 @@ export default function App() {
                     <button className="btn btn-dark" onClick={() => abrirInspecao(inspecao)}>Abrir</button>
                     <button className="btn btn-secondary" onClick={() => duplicarInspecao(inspecao)}>Duplicar</button>
                     <button className="btn btn-danger" onClick={() => excluirInspecao(inspecao.id)}>Excluir</button>
+                    {ehAdminMaster(usuarioLogado) && usuariosAtivosTransferencia.length > 1 && (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+                        <select
+                          value={transferenciaDestinoPorInspecao[inspecao.id] || ""}
+                          onChange={(e) => atualizarDestinoTransferencia(inspecao.id, e.target.value)}
+                          style={{ minWidth: 190, borderRadius: 10, padding: "8px 10px", border: "1px solid rgba(148,163,184,0.45)", background: "#ffffff", color: "#0f172a", fontWeight: 700 }}
+                        >
+                          <option value="">Enviar para usuário...</option>
+                          {usuariosAtivosTransferencia
+                            .filter((usuario) => usuario.id !== inspecao.usuarioId)
+                            .map((usuario) => (
+                              <option key={usuario.id} value={usuario.id}>
+                                {usuario.nomeCompleto || usuario.email}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => transferirInspecaoParaUsuario(inspecao.id)}
+                          disabled={!transferenciaDestinoPorInspecao[inspecao.id]}
+                        >
+                          Transferir
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </article>
               ))}
@@ -5707,6 +5860,31 @@ export default function App() {
                       <button className="btn btn-dark" onClick={() => abrirInspecao(inspecao)}>Abrir</button>
                       <button className="btn btn-secondary" onClick={() => duplicarInspecao(inspecao)}>Duplicar para mim</button>
                       <button className="btn btn-danger" onClick={() => excluirInspecao(inspecao.id)}>Excluir</button>
+                      {ehAdminMaster(usuarioLogado) && usuariosAtivosTransferencia.length > 1 && (
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+                          <select
+                            value={transferenciaDestinoPorInspecao[inspecao.id] || ""}
+                            onChange={(e) => atualizarDestinoTransferencia(inspecao.id, e.target.value)}
+                            style={{ minWidth: 190, borderRadius: 10, padding: "8px 10px", border: "1px solid rgba(148,163,184,0.45)", background: "#ffffff", color: "#0f172a", fontWeight: 700 }}
+                          >
+                            <option value="">Transferir para...</option>
+                            {usuariosAtivosTransferencia
+                              .filter((usuario) => usuario.id !== inspecao.usuarioId)
+                              .map((usuario) => (
+                                <option key={usuario.id} value={usuario.id}>
+                                  {usuario.nomeCompleto || usuario.email}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => transferirInspecaoParaUsuario(inspecao.id)}
+                            disabled={!transferenciaDestinoPorInspecao[inspecao.id]}
+                          >
+                            Transferir
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </article>
                 ))}
