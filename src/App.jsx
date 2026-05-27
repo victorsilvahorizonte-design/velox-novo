@@ -654,6 +654,15 @@ function filtrarInspecoesValidas(lista = []) {
   return lista.map(normalizarInspecaoSegura).filter(Boolean);
 }
 
+function estaInspecaoNaLixeira(inspecao = {}) {
+  return inspecao?.excluida === true || inspecao?.statusGeral === "excluida";
+}
+
+function descricaoInspecaoCurta(inspecao = {}) {
+  const icao = inspecao?.aeroporto?.icao || inspecao?.configAerodromo?.icao || "SEM ICAO";
+  const nome = inspecao?.aeroporto?.nome || inspecao?.configAerodromo?.nomeAerodromo || "Aeródromo não informado";
+  return `${icao} — ${nome}`;
+}
 
 
 function removerConteudoPesadoImagem(evidencia = {}) {
@@ -1882,6 +1891,19 @@ export default function App() {
   const [mostrarMinhasInspecoes, setMostrarMinhasInspecoes] = useState(true);
   const [adminUsuarioSelecionado, setAdminUsuarioSelecionado] = useState("");
   const [isMobileVCP, setIsMobileVCP] = useState(false);
+  const [ultimoSalvamentoVisual, setUltimoSalvamentoVisual] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.ultimoAutosave) || "";
+    } catch {
+      return "";
+    }
+  });
+  const [salvamentoVisual, setSalvamentoVisual] = useState({
+    ativo: false,
+    progresso: 0,
+    texto: "Pronto para salvar",
+    tipo: "idle",
+  });
 
   // Autosave V3 VELOX — Bugs 6 e 7
   // Mantém sempre a função de salvar mais recente disponível para o temporizador,
@@ -1893,6 +1915,49 @@ export default function App() {
 
   function existeInspecaoParaAutosave() {
     return Boolean(usuarioLogado?.id && (configAerodromo.icao || configAerodromo.nomeAerodromo));
+  }
+
+  function iniciarIndicadorSalvamento(origem = "manual") {
+    const ehAuto = String(origem || "").startsWith("autosave");
+    setSalvamentoVisual({
+      ativo: true,
+      progresso: 8,
+      texto: ehAuto ? "Autosave em andamento..." : "Salvando inspeção...",
+      tipo: "andamento",
+    });
+  }
+
+  function atualizarIndicadorSalvamento(progresso, texto, tipo = "andamento") {
+    setSalvamentoVisual((atual) => ({
+      ...atual,
+      ativo: true,
+      progresso: Math.max(0, Math.min(100, Number(progresso || 0))),
+      texto: texto || atual.texto || "Salvando...",
+      tipo,
+    }));
+  }
+
+  function concluirIndicadorSalvamento(texto, tipo = "sucesso", dataISO = new Date().toISOString()) {
+    setUltimoSalvamentoVisual(dataISO);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ultimoAutosave, dataISO);
+    } catch {}
+
+    setSalvamentoVisual({
+      ativo: false,
+      progresso: 100,
+      texto: texto || "Salvo com sucesso.",
+      tipo,
+    });
+  }
+
+  function falharIndicadorSalvamento(texto) {
+    setSalvamentoVisual({
+      ativo: false,
+      progresso: 100,
+      texto: texto || "Falha ao salvar.",
+      tipo: "erro",
+    });
   }
 
   function marcarAlteracaoPendente() {
@@ -2316,12 +2381,22 @@ export default function App() {
     };
   }, [configAerodromo, respostasPorNorma]);
 
+  const inspecoesAtivas = useMemo(() => {
+    return inspecoes.filter((insp) => !estaInspecaoNaLixeira(insp));
+  }, [inspecoes]);
+
+  const inspecoesLixeira = useMemo(() => {
+    return inspecoes
+      .filter(estaInspecaoNaLixeira)
+      .sort((a, b) => String(b.excluidaEm || b.atualizadoEm).localeCompare(String(a.excluidaEm || a.atualizadoEm)));
+  }, [inspecoes]);
+
   const minhasInspecoes = useMemo(() => {
     if (!usuarioLogado?.id) return [];
-    return inspecoes
+    return inspecoesAtivas
       .filter((insp) => insp.usuarioId === usuarioLogado.id)
       .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
-  }, [inspecoes, usuarioLogado]);
+  }, [inspecoesAtivas, usuarioLogado]);
 
   const estatisticasAdmin = useMemo(() => {
     const totalUsuarios = usuarios.length;
@@ -2329,7 +2404,7 @@ export default function App() {
     const bloqueados = usuarios.filter((u) => u.statusCadastro === "bloqueado").length;
     const ativos = usuarios.filter((u) => u.ativo !== false).length;
     const admins = usuarios.filter((u) => ehAdmin(u)).length;
-    const concluidas = inspecoes.filter((i) => i.statusGeral === "concluida").length;
+    const concluidas = inspecoesAtivas.filter((i) => i.statusGeral === "concluida").length;
 
     return {
       totalUsuarios,
@@ -2337,18 +2412,19 @@ export default function App() {
       pendentes,
       bloqueados,
       admins,
-      totalInspecoes: inspecoes.length,
+      totalInspecoes: inspecoesAtivas.length,
+      totalLixeira: inspecoesLixeira.length,
       concluidas,
-      emAndamento: inspecoes.length - concluidas,
+      emAndamento: inspecoesAtivas.length - concluidas,
     };
-  }, [usuarios, inspecoes]);
+  }, [usuarios, inspecoesAtivas, inspecoesLixeira]);
 
   const inspecoesUsuarioAdmin = useMemo(() => {
     if (!adminUsuarioSelecionado) return [];
-    return inspecoes
+    return inspecoesAtivas
       .filter((insp) => insp.usuarioId === adminUsuarioSelecionado)
       .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
-  }, [inspecoes, adminUsuarioSelecionado]);
+  }, [inspecoesAtivas, adminUsuarioSelecionado]);
 
   function atualizarResposta(item, campo, valor) {
     const chave = item.id || item.ref;
@@ -3434,6 +3510,9 @@ export default function App() {
         return null;
       }
 
+      iniciarIndicadorSalvamento(origem);
+      atualizarIndicadorSalvamento(18, "Preparando dados da inspeção...");
+
       const objetoBase = criarObjetoInspecao(inspecaoAtualId);
       const objeto = normalizarInspecaoSegura({
         ...objetoBase,
@@ -3446,25 +3525,30 @@ export default function App() {
         throw new Error("Não foi possível montar um objeto de inspeção válido para salvar.");
       }
 
+      atualizarIndicadorSalvamento(32, "Gravando cópia local segura...");
+
       const locaisAtuais = filtrarInspecoesValidas(safeParse(localStorage.getItem(STORAGE_KEYS.inspecoes), []));
       const proximaLista = mesclarInspecoesPorAtualizacao([objeto], locaisAtuais, inspecoes);
 
       setInspecoes(proximaLista);
       gravarInspecoesLocalSeguro(proximaLista);
-      localStorage.setItem(STORAGE_KEYS.ultimoAutosave, new Date().toISOString());
+      localStorage.setItem(STORAGE_KEYS.ultimoAutosave, objeto.atualizadoEm || new Date().toISOString());
+      setUltimoSalvamentoVisual(objeto.atualizadoEm || new Date().toISOString());
       setInspecaoAtualId(objeto.id);
+      atualizarIndicadorSalvamento(55, "Cópia local preservada. Verificando sincronização online...");
 
       if (!navegadorEstaOnline()) {
         adicionarInspecaoNaFilaSync(objeto);
-        setMensagemBase(
-          String(origem).startsWith("autosave")
-            ? `Autosave offline realizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}. A sincronização ocorrerá quando a internet voltar.`
-            : `Inspeção salva offline neste aparelho: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}). Será sincronizada quando a internet voltar.`
-        );
+        const mensagemOffline = String(origem).startsWith("autosave")
+          ? `Autosave offline realizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}. A sincronização ocorrerá quando a internet voltar.`
+          : `Inspeção salva offline neste aparelho: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}). Será sincronizada quando a internet voltar.`;
+        setMensagemBase(mensagemOffline);
+        concluirIndicadorSalvamento("Salvo offline. Sincronização pendente.", "pendente", objeto.atualizadoEm || new Date().toISOString());
         return objeto;
       }
 
       try {
+        atualizarIndicadorSalvamento(72, "Enviando dados para o Firebase...");
         await salvarInspecaoFirebase(prepararInspecaoParaFirebase(objeto));
         removerInspecaoDaFilaSync(objeto.id);
 
@@ -3484,6 +3568,7 @@ export default function App() {
             ? `Autosave sincronizado: ${objeto.aeroporto.icao || objeto.aeroporto.nome}.`
             : `Inspeção salva e sincronizada: ${objeto.aeroporto.nome} (${objeto.aeroporto.icao || "sem ICAO"}).`
         );
+        concluirIndicadorSalvamento("Salvo e sincronizado online.", "sucesso", sincronizado.atualizadoEm || objeto.atualizadoEm || new Date().toISOString());
       } catch (erro) {
         console.error("Falha ao salvar online; mantendo fila offline:", erro);
         adicionarInspecaoNaFilaSync({
@@ -3497,6 +3582,7 @@ export default function App() {
             ? "Autosave local realizado. A sincronização online ficou pendente."
             : `Inspeção salva neste aparelho, mas ainda pendente de sincronização online: ${mensagemErroFirebase(erro)}`
         );
+        concluirIndicadorSalvamento("Salvo localmente. Sincronização online pendente.", "pendente", objeto.atualizadoEm || new Date().toISOString());
         if (!silencioso) {
           alert(`A inspeção foi salva no aparelho. A sincronização online ficou pendente: ${mensagemErroFirebase(erro)}`);
         }
@@ -3506,6 +3592,7 @@ export default function App() {
     } catch (erro) {
       console.error("Erro crítico ao salvar inspeção:", erro);
       setMensagemBase(`Erro ao salvar inspeção: ${erro.message || erro}`);
+      falharIndicadorSalvamento(`Erro ao salvar: ${erro.message || erro}`);
       if (!silencioso) alert(`Erro ao salvar inspeção: ${erro.message || erro}`);
       return null;
     }
@@ -3593,25 +3680,142 @@ export default function App() {
     setMensagemBase("Inspeção duplicada com sucesso.");
   }
 
-  function excluirInspecao(id) {
-    if (!window.confirm("Deseja excluir esta inspeção salva? Esta ação não poderá ser desfeita.")) return;
-    setInspecoes((prev) => prev.filter((insp) => insp.id !== id));
-    excluirInspecaoFirebase(id).catch((erro) => {
+  async function sincronizarInspecaoLixeira(inspecaoAtualizada, mensagemSucesso = "Inspeção atualizada.") {
+    try {
+      await salvarInspecaoFirebase(prepararInspecaoParaFirebase(inspecaoAtualizada));
+      setMensagemBase(mensagemSucesso);
+    } catch (erro) {
       console.error(erro);
-      alert(`Erro ao excluir inspeção online: ${mensagemErroFirebase(erro)}`);
+      adicionarInspecaoNaFilaSync(inspecaoAtualizada);
+      setMensagemBase(`${mensagemSucesso} A sincronização online ficou pendente.`);
+      alert(`Alteração salva localmente, mas pendente de sincronização online: ${mensagemErroFirebase(erro)}`);
+    }
+  }
+
+  function moverInspecaoParaLixeira(id) {
+    const alvo = inspecoes.find((insp) => insp.id === id);
+    if (!alvo) return;
+
+    if (!window.confirm(`Mover para a Lixeira?\n\n${descricaoInspecaoCurta(alvo)}\n\nAs fotos NÃO serão apagadas do Firebase Storage.`)) return;
+
+    const agora = new Date().toISOString();
+    const atualizada = {
+      ...alvo,
+      excluida: true,
+      statusAntesExclusao: alvo.statusGeral || "em_andamento",
+      statusGeral: "excluida",
+      excluidaEm: agora,
+      excluidaPor: usuarioLogado?.id || "",
+      excluidaPorNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
+      atualizadoEm: agora,
+      sincronizadoOnline: false,
+      pendenteSync: true,
+    };
+
+    setInspecoes((prev) => {
+      const lista = prev.map((insp) => (insp.id === id ? atualizada : insp));
+      gravarInspecoesLocalSeguro(lista);
+      return lista;
     });
+
     if (inspecaoAtualId === id) limparInspecaoAtual();
+    sincronizarInspecaoLixeira(atualizada, "Inspeção movida para a Lixeira do Admin Master.");
+  }
+
+  function excluirInspecao(id) {
+    moverInspecaoParaLixeira(id);
   }
 
   function excluirTodasMinhasInspecoes() {
-    if (!window.confirm("Deseja excluir TODAS as suas inspeções salvas?")) return;
     const usuarioId = usuarioLogado.id;
-    setInspecoes((prev) => prev.filter((insp) => insp.usuarioId !== usuarioId));
-    excluirInspecoesDoUsuarioFirebase(usuarioId).catch((erro) => {
-      console.error(erro);
-      alert(`Erro ao excluir inspeções online: ${mensagemErroFirebase(erro)}`);
+    const minhasAtivas = inspecoesAtivas.filter((insp) => insp.usuarioId === usuarioId);
+    if (!minhasAtivas.length) return;
+
+    if (!window.confirm(`Mover TODAS as suas ${minhasAtivas.length} inspeções para a Lixeira?\n\nAs fotos NÃO serão apagadas do Firebase Storage.`)) return;
+
+    const agora = new Date().toISOString();
+    const ids = new Set(minhasAtivas.map((insp) => insp.id));
+    const atualizadas = minhasAtivas.map((insp) => ({
+      ...insp,
+      excluida: true,
+      statusAntesExclusao: insp.statusGeral || "em_andamento",
+      statusGeral: "excluida",
+      excluidaEm: agora,
+      excluidaPor: usuarioLogado?.id || "",
+      excluidaPorNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
+      atualizadoEm: agora,
+      sincronizadoOnline: false,
+      pendenteSync: true,
+    }));
+
+    setInspecoes((prev) => {
+      const mapa = new Map(atualizadas.map((insp) => [insp.id, insp]));
+      const lista = prev.map((insp) => (ids.has(insp.id) ? mapa.get(insp.id) : insp));
+      gravarInspecoesLocalSeguro(lista);
+      return lista;
     });
+
+    atualizadas.forEach((insp) => sincronizarInspecaoLixeira(insp, "Inspeções movidas para a Lixeira."));
     limparInspecaoAtual();
+  }
+
+  function restaurarInspecaoDaLixeira(id) {
+    const alvo = inspecoes.find((insp) => insp.id === id);
+    if (!alvo) return;
+    if (!ehAdminMaster(usuarioLogado)) {
+      alert("Somente o Admin Master pode restaurar inspeções da Lixeira.");
+      return;
+    }
+
+    const agora = new Date().toISOString();
+    const restaurada = {
+      ...alvo,
+      excluida: false,
+      statusGeral: alvo.statusAntesExclusao || "em_andamento",
+      restauradaEm: agora,
+      restauradaPor: usuarioLogado?.id || "",
+      restauradaPorNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
+      atualizadoEm: agora,
+      pendenteSync: true,
+      sincronizadoOnline: false,
+    };
+    delete restaurada.excluidaEm;
+    delete restaurada.excluidaPor;
+    delete restaurada.excluidaPorNome;
+
+    setInspecoes((prev) => {
+      const lista = prev.map((insp) => (insp.id === id ? restaurada : insp));
+      gravarInspecoesLocalSeguro(lista);
+      return lista;
+    });
+
+    sincronizarInspecaoLixeira(restaurada, "Inspeção restaurada com sucesso.");
+  }
+
+  function excluirInspecaoDefinitiva(id) {
+    const alvo = inspecoes.find((insp) => insp.id === id);
+    if (!alvo) return;
+    if (!ehAdminMaster(usuarioLogado)) {
+      alert("Somente o Admin Master pode excluir definitivamente.");
+      return;
+    }
+
+    const confirmar = window.prompt(
+      `Excluir definitivamente o REGISTRO da inspeção?\n\n${descricaoInspecaoCurta(alvo)}\n\nDigite EXCLUIR para confirmar. As fotos no Storage não serão removidas por esta etapa de segurança.`
+    );
+
+    if (String(confirmar || "").trim().toUpperCase() !== "EXCLUIR") return;
+
+    setInspecoes((prev) => {
+      const lista = prev.filter((insp) => insp.id !== id);
+      gravarInspecoesLocalSeguro(lista);
+      return lista;
+    });
+
+    excluirInspecaoFirebase(id).catch((erro) => {
+      console.error(erro);
+      alert(`Erro ao excluir registro online: ${mensagemErroFirebase(erro)}`);
+    });
   }
 
   async function limparTodasInspecoesSistemaAdminMaster() {
@@ -3620,45 +3824,58 @@ export default function App() {
       return;
     }
 
-    if (!inspecoes.length) {
-      alert("Não há inspeções salvas para excluir.");
+    if (!inspecoesAtivas.length) {
+      alert("Não há inspeções ativas para mover para a Lixeira.");
       return;
     }
 
     const primeiraConfirmacao = window.confirm(
-      `ATENÇÃO: você está prestes a excluir TODAS as ${inspecoes.length} inspeções salvas de TODOS os usuários.\n\nUsuários, cadastros e Admin Master serão preservados. Deseja continuar?`
+      `ATENÇÃO: você está prestes a mover TODAS as ${inspecoesAtivas.length} inspeções ativas de TODOS os usuários para a Lixeira.\n\nUsuários, cadastros, Admin Master e fotos no Firebase Storage serão preservados. Deseja continuar?`
     );
 
     if (!primeiraConfirmacao) return;
 
     const textoConfirmacao = window.prompt(
-      "Para confirmar a limpeza total das inspeções, digite exatamente: LIMPAR SISTEMA"
+      "Para confirmar o envio das inspeções para a Lixeira, digite exatamente: ENVIAR PARA LIXEIRA"
     );
 
-    if (String(textoConfirmacao || "").trim().toUpperCase() !== "LIMPAR SISTEMA") {
-      alert("Confirmação inválida. Nenhuma inspeção foi apagada.");
+    if (String(textoConfirmacao || "").trim().toUpperCase() !== "ENVIAR PARA LIXEIRA") {
+      alert("Confirmação inválida. Nenhuma inspeção foi movida.");
       return;
     }
 
     try {
-      setMensagemBase("Limpando todas as inspeções do sistema...");
+      setMensagemBase("Movendo inspeções para a Lixeira do Admin Master...");
 
-      await Promise.all(
-        inspecoes
-          .filter((insp) => insp?.id)
-          .map((insp) => excluirInspecaoFirebase(insp.id))
-      );
+      const agora = new Date().toISOString();
+      const atualizadas = inspecoesAtivas.map((insp) => ({
+        ...insp,
+        excluida: true,
+        statusAntesExclusao: insp.statusGeral || "em_andamento",
+        statusGeral: "excluida",
+        excluidaEm: agora,
+        excluidaPor: usuarioLogado?.id || "",
+        excluidaPorNome: usuarioLogado?.nomeCompleto || usuarioLogado?.email || "",
+        atualizadoEm: agora,
+        pendenteSync: true,
+        sincronizadoOnline: false,
+      }));
+      const mapa = new Map(atualizadas.map((insp) => [insp.id, insp]));
+      const lista = inspecoes.map((insp) => (mapa.has(insp.id) ? mapa.get(insp.id) : insp));
 
-      setInspecoes([]);
-      gravarInspecoesLocalSeguro([]);
+      setInspecoes(lista);
+      gravarInspecoesLocalSeguro(lista);
+
+      await Promise.all(atualizadas.map((insp) => salvarInspecaoFirebase(prepararInspecaoParaFirebase(insp))));
+
       setInspecaoAtualId(null);
       setRespostasPorNorma(criarRespostasNormas());
-      setMensagemBase("Limpeza total concluída. Todas as inspeções foram excluídas. Usuários preservados.");
-      alert("Limpeza total concluída. Todas as inspeções foram excluídas do sistema.");
+      setMensagemBase("Inspeções movidas para a Lixeira. Usuários e fotos preservados.");
+      alert("Inspeções movidas para a Lixeira do Admin Master. As fotos não foram apagadas.");
     } catch (erro) {
       console.error(erro);
-      alert(`Erro ao limpar todas as inspeções: ${mensagemErroFirebase(erro)}`);
-      setMensagemBase("Falha ao limpar todas as inspeções. Verifique o console e tente novamente.");
+      alert(`Erro ao mover inspeções para a Lixeira: ${mensagemErroFirebase(erro)}`);
+      setMensagemBase("Falha ao mover inspeções para a Lixeira. Verifique o console e tente novamente.");
     }
   }
 
@@ -5300,6 +5517,41 @@ export default function App() {
               <button className="btn btn-danger" onClick={limparInspecaoAtual}>Limpar atual</button>
             </div>
           </div>
+
+          <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(148,163,184,0.35)", background: "rgba(15,23,42,0.06)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <strong style={{ fontSize: 13 }}>
+                {salvamentoVisual.tipo === "erro"
+                  ? "⚠ Falha no salvamento"
+                  : salvamentoVisual.tipo === "pendente"
+                    ? "Salvo localmente"
+                    : salvamentoVisual.ativo
+                      ? "Salvando..."
+                      : "Status de salvamento"}
+              </strong>
+              <small style={{ fontSize: 11, opacity: 0.85 }}>
+                Último salvamento: {ultimoSalvamentoVisual ? dataBR(ultimoSalvamentoVisual) : "Ainda não salvo nesta sessão"}
+              </small>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, overflow: "hidden", background: "rgba(148,163,184,0.35)" }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: `${Math.max(0, Math.min(100, salvamentoVisual.progresso || 0))}%`,
+                  transition: "width 350ms ease",
+                  background:
+                    salvamentoVisual.tipo === "erro"
+                      ? "#ef4444"
+                      : salvamentoVisual.tipo === "pendente"
+                        ? "#f59e0b"
+                        : "#22c55e",
+                }}
+              />
+            </div>
+            <small style={{ display: "block", marginTop: 6, fontSize: 11, opacity: 0.85 }}>
+              {salvamentoVisual.texto || "Pronto para salvar."} {salvamentoVisual.ativo ? `${salvamentoVisual.progresso || 0}%` : ""}
+            </small>
+          </div>
         </section>
 
         <section className="card inspections-card">
@@ -5326,13 +5578,13 @@ export default function App() {
                     {isMobileVCP ? (
                       <>
                         <strong style={{ fontSize: 22, letterSpacing: 1 }}>{inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "SEM ICAO"}</strong>
-                        <small>Atualizada em {dataBR(inspecao.atualizadoEm)}</small>
+                        <small>Último salvamento: {dataBR(inspecao.atualizadoEm)}</small>
                       </>
                     ) : (
                       <>
                         <strong>{inspecao.aeroporto?.nome || "Aeródromo não informado"}</strong>
                         <span>{inspecao.aeroporto?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || "—"}/{inspecao.aeroporto?.uf || "—"}</span>
-                        <small>Atualizada em {dataBR(inspecao.atualizadoEm)} • Inspetor: {inspecao.inspetorNome}</small>
+                        <small>Último salvamento: {dataBR(inspecao.atualizadoEm)} • Inspetor: {inspecao.inspetorNome}</small>
                       </>
                     )}
                   </div>
@@ -5377,13 +5629,14 @@ export default function App() {
               <div><b>{estatisticasAdmin.totalInspecoes}</b><span>Inspeções</span></div>
               <div><b>{estatisticasAdmin.concluidas}</b><span>Concluídas</span></div>
               <div><b>{estatisticasAdmin.emAndamento}</b><span>Em andamento</span></div>
+              <div><b>{estatisticasAdmin.totalLixeira}</b><span>Na lixeira</span></div>
             </div>
 
             {ehAdminMaster(usuarioLogado) && (
               <div className="admin-danger-zone" style={{ marginTop: 18, padding: 16, borderRadius: 16, border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)" }}>
                 <h3 style={{ margin: "0 0 6px", color: "#fecaca" }}>Zona crítica do Admin Master</h3>
                 <p style={{ margin: "0 0 12px", color: "#e5e7eb" }}>
-                  Exclui todas as inspeções salvas de todos os usuários. Usuários, cadastros, permissões e Admin Master serão preservados.
+                  Move todas as inspeções ativas para a Lixeira do Admin Master. Usuários, permissões e fotos no Firebase Storage serão preservados.
                 </p>
                 <button
                   type="button"
@@ -5391,14 +5644,14 @@ export default function App() {
                   onClick={limparTodasInspecoesSistemaAdminMaster}
                   disabled={estatisticasAdmin.totalInspecoes === 0}
                 >
-                  ⚠ Limpar todas as inspeções do sistema
+                  🗑 Enviar todas as inspeções para a Lixeira
                 </button>
               </div>
             )}
 
             <div className="admin-users">
               {usuarios.map((usuario) => {
-                const totalDoUsuario = inspecoes.filter((insp) => insp.usuarioId === usuario.id).length;
+                const totalDoUsuario = inspecoesAtivas.filter((insp) => insp.usuarioId === usuario.id).length;
                 const pendente = usuario.ativo === false && usuario.statusCadastro !== "bloqueado";
                 const bloqueado = usuario.statusCadastro === "bloqueado";
 
@@ -5448,12 +5701,58 @@ export default function App() {
                     <div>
                       <strong>{inspecao.aeroporto?.nome || "Aeródromo não informado"}</strong>
                       <span>{inspecao.aeroporto?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || "—"}/{inspecao.aeroporto?.uf || "—"}</span>
-                      <small>Atualizada em {dataBR(inspecao.atualizadoEm)} • {inspecao.percentualConcluido || 0}% concluída</small>
+                      <small>Último salvamento: {dataBR(inspecao.atualizadoEm)} • {inspecao.percentualConcluido || 0}% concluída</small>
                     </div>
                     <div className="inspection-actions">
                       <button className="btn btn-dark" onClick={() => abrirInspecao(inspecao)}>Abrir</button>
                       <button className="btn btn-secondary" onClick={() => duplicarInspecao(inspecao)}>Duplicar para mim</button>
                       <button className="btn btn-danger" onClick={() => excluirInspecao(inspecao.id)}>Excluir</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {ehAdminMaster(usuarioLogado) && (
+          <section className="card admin-card" style={{ border: "1px solid rgba(245,158,11,0.35)", background: "rgba(30,41,59,0.92)" }}>
+            <div className="grid">
+              <div className="col-8">
+                <h2 className="card-title">Lixeira do Admin Master</h2>
+                <p className="card-subtitle">
+                  Inspeções excluídas ficam preservadas aqui para restauração. As fotos no Firebase Storage não são apagadas na exclusão normal.
+                </p>
+              </div>
+              <div className="col-4 align-end">
+                <div className="admin-status-box">
+                  <strong>{inspecoesLixeira.length}</strong>
+                  <span>registro(s) na lixeira</span>
+                </div>
+              </div>
+            </div>
+
+            {inspecoesLixeira.length === 0 && <div className="empty-state">Nenhuma inspeção na Lixeira.</div>}
+
+            {inspecoesLixeira.length > 0 && (
+              <div className="inspections-list">
+                {inspecoesLixeira.map((inspecao) => (
+                  <article className="inspection-row" key={inspecao.id}>
+                    <div>
+                      <strong>{inspecao.aeroporto?.nome || inspecao.configAerodromo?.nomeAerodromo || "Aeródromo não informado"}</strong>
+                      <span>{inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "Sem ICAO"} • {inspecao.aeroporto?.municipio || inspecao.configAerodromo?.municipio || "—"}/{inspecao.aeroporto?.uf || inspecao.configAerodromo?.uf || "—"}</span>
+                      <small>
+                        Excluída em: {dataBR(inspecao.excluidaEm || inspecao.atualizadoEm)} • Por: {inspecao.excluidaPorNome || "—"} • Inspetor original: {inspecao.inspetorNome || "—"}
+                      </small>
+                    </div>
+                    <div className="inspection-progress">
+                      <b>{inspecao.percentualConcluido || 0}% • {inspecao.aeroporto?.icao || inspecao.configAerodromo?.icao || "SEM ICAO"}</b>
+                      <small>Registro preservado para auditoria</small>
+                    </div>
+                    <div className="inspection-actions">
+                      <button className="btn btn-dark" onClick={() => restaurarInspecaoDaLixeira(inspecao.id)}>Restaurar</button>
+                      <button className="btn btn-secondary" onClick={() => abrirInspecao(inspecao)}>Abrir</button>
+                      <button className="btn btn-danger" onClick={() => excluirInspecaoDefinitiva(inspecao.id)}>Excluir definitivo</button>
                     </div>
                   </article>
                 ))}
