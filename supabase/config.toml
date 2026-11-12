@@ -1,0 +1,5 @@
+[functions.velox-api]
+verify_jwt = true
+
+[functions.velox-whatsapp-webhook]
+verify_jwt = false
