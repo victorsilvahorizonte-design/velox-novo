@@ -65,3 +65,9 @@ A operação real pelo WhatsApp permanece pendente de integração completa e te
 ## Organização desta importação
 
 Fonte extraída do StackBlitz em 12/11/2026. As imagens `public/assets/velox_brand_*.webp` e o arquivo antigo `src/assets/hero.png` não puderam ser exportados pelo sistema de arquivos do WebContainer. As telas atuais usam suas imagens incorporadas no HTML; a compilação da versão atual foi verificada sem esses arquivos. A página inicial antiga do template Vite em `src/main.js` não é entrada do aplicativo atual.
+
+## Publicação na Vercel
+
+`vercel.json` seleciona `npm run check:producao` e a saída `dist-uso-real`. Importe a branch `velox-gestao-1.0` para um projeto de gestão separado. Não utilizar o projeto financeiro nem o de inspeção. Configure Node.js 24 e as variáveis públicas descritas em `.env.exemplo`; não colocar segredos administrativos na Vercel.
+
+As páginas públicas `privacidade.html` e `exclusao-de-dados.html` são incluídas no build sem login. Os caminhos `/privacidade` e `/exclusao-de-dados` também são atendidos. Após o deploy, verificar as URLs públicas reais antes de cadastrá-las na Meta. A publicação não ativa por si só a coleta de ponto nem o acesso ao banco.
